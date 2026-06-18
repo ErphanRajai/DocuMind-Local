@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./pdf-summarizer-backend
+      dockerfile: Dockerfile
+    container_name: pdf_backend
+    ports:
+      - "8888:8888"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - D:\pdf_container_data\db:/workspace/db_data
+      - D:\pdf_container_data\uploads:/workspace/uploaded_pdfs
+    restart: always

@@ -10,7 +10,7 @@ services:
       - "8888:8888"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - D:\pdf_container_data\db:/workspace/db_data
-      - D:\pdf_container_data\uploads:/workspace/uploaded_pdfs
+volumes:
+  - ./db_data:/workspace/db_data
+  - ./uploaded_pdfs:/workspace/uploaded_pdfs
     restart: always

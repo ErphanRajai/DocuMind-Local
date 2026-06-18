@@ -1,9 +1,10 @@
 import httpx
 import json
 from typing import AsyncGenerator
+import os
 
 class LLMService:
-    API_URL = "http://host.docker.internal:11434/api/chat"
+    API_URL = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434/api/chat")
 
     @staticmethod
     async def stream_summarize_chunks(chunks: list[str]) -> AsyncGenerator[str, None]:

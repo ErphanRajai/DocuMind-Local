@@ -19,3 +19,4 @@ uploaded_pdfs/
 
 .DS_Store
 Thumbs.db
+ollama_storage/

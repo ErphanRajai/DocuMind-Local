@@ -8,9 +8,33 @@ services:
     container_name: pdf_backend
     ports:
       - "8888:8888"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-volumes:
-  - ./db_data:/workspace/db_data
-  - ./uploaded_pdfs:/workspace/uploaded_pdfs
+    environment:
+      - OLLAMA_API_URL=http://ollama_service:11434/api/chat
+    volumes:
+      - ./db_data:/workspace/db_data
+      - ./uploaded_pdfs:/workspace/uploaded_pdfs
+    depends_on:
+      - ollama_service
     restart: always
+
+  ollama_service:
+    image: ollama/ollama:latest
+    container_name: ollama_node
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_storage:/root/.ollama
+    restart: always
+
+  ollama_model_puller:
+    image: alpine:latest
+    container_name: ollama_init
+    depends_on:
+      - ollama_service
+    entrypoint: >
+      sh -c "apk add --no-cache curl &&
+             echo 'Waiting for Ollama to boot...' &&
+             while ! curl -s http://ollama_service:11434/api/tags > /dev/null; do sleep 2; done &&
+             echo 'Pulling Llama 3.2 model weights...' &&
+             curl -X POST http://ollama_service:11434/api/pull -d '{\"name\": \"llama3.2:3b\"}' &&
+             echo 'Model fully cached!'"

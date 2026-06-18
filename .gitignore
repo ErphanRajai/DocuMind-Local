@@ -1,0 +1,17 @@
+# Python bytecode environment caches
+__pycache__/
+*.pyc
+front_env/
+.venv/
+
+# Local data volumes (Crucial!)
+uploaded_pdfs/
+db_data/
+*.db
+*.sqlite3
+
+# OS metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

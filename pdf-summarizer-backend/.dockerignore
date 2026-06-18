@@ -1,0 +1,18 @@
+# Ignore local python virtual environments
+win_env/
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Ignore local database state and test files
+pdf_summarizer.db
+test_processor.py
+test.py
+
+# Ignore local file storage folder containing your 16 test files
+uploaded_pdfs/
+
+# Ignore git metadata
+.git/
+.gitignore

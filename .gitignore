@@ -1,17 +1,21 @@
-# Python bytecode environment caches
 __pycache__/
 *.pyc
-front_env/
-.venv/
+*.pyo
+*.pyd
 
-# Local data volumes (Crucial!)
-uploaded_pdfs/
-db_data/
+front_env/
+back_env/
+venv/
+.venv/
+env/
+
+.vscode/
+.idea/
+
 *.db
 *.sqlite3
+db_data/
+uploaded_pdfs/
 
-# OS metadata
 .DS_Store
 Thumbs.db
-.idea/
-.vscode/

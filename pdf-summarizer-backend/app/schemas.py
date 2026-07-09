@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List, Dict
 from datetime import datetime
 
 class PDFDocumentBase(BaseModel):
@@ -29,3 +29,12 @@ class PDFDocumentResponse(PDFDocumentBase):
 
     class Config:
         from_attributes = True
+
+class ChatMessage(BaseModel):
+    role:str
+    content:str
+
+class ChatRequest(BaseModel):
+    pdf_ids: List[int]
+    question:str
+    history: Optional[List[ChatMessage]] = []

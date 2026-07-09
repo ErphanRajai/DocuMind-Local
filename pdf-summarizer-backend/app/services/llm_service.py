@@ -6,7 +6,6 @@ import os
 class LLMService:
     API_URL = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434/api/chat")
 
-    # --- پرامپت فوق‌حرفه‌ای برای استخراج اطلاعات از هر چانک (Map Phase) ---
     MAP_SYSTEM_PROMPT = (
         "You are an elite AI Senior Research Scientist and Technical Analyst.\n"
         "Your task is to analyze the provided document extract and distill its core intelligence.\n\n"
@@ -17,7 +16,6 @@ class LLMService:
         "- Do NOT add conversational filler like 'Here is the summary' or 'Based on the text'."
     )
 
-    # --- پرامپت فوق‌حرفه‌ای برای ترکیب نهایی و ساخت گزارش SOTA (Reduce Phase & Short Docs) ---
     REDUCE_SYSTEM_PROMPT = (
         "You are a Principal AI Executive Strategist producing a State-of-the-Art (SOTA) Intelligence Briefing.\n"
         "Synthesize the provided text into an executive-ready, highly structured analytical document.\n\n"
@@ -57,7 +55,7 @@ class LLMService:
                     print(f"DEBUG: Map exception for chunk {i+1}: {str(e)}")
             
             if not all_section_summaries:
-                return "خطا در تولید خلاصه."
+                return "Error in making the summary..."
                 
             reduced_context = "\n\n---\n\n".join(all_section_summaries)
             
@@ -86,7 +84,6 @@ class LLMService:
         full_text_joined = "\n\n".join(chunks)
 
         async with httpx.AsyncClient(timeout=180.0) as client:
-            # --- مسیر ۱: فایل‌های کوتاه یا پرامپت اختصاصی کاربر ---
             if total_word_count < 2500 or custom_prompt:
                 system_instruction = (
                     custom_prompt if custom_prompt else LLMService.REDUCE_SYSTEM_PROMPT
@@ -113,7 +110,6 @@ class LLMService:
                     yield f"[Connection Error: {str(e)}]"
                 return
 
-            # --- مسیر ۲: فایل‌های طولانی (Map-Reduce) ---
             all_section_summaries = []
             for i, chunk in enumerate(chunks):
                 current_chunk_summary = ""

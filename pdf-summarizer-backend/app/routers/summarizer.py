@@ -3,13 +3,15 @@ import asyncio
 import json
 import httpx
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, BackgroundTasks
+from typing import Optional, List
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas
 from ..services.pdf_processor import PDFProcessorService
 from ..services.llm_service import LLMService
+from ..services.vector_db import store_chunks_in_qdrant, search_chunks_in_qdrant
 
 router = APIRouter(
     prefix="/summarizer",
@@ -20,13 +22,9 @@ UPLOAD_DIR = "./uploaded_pdfs"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def process_pdf_worker(pdf_id: int, file_path: str, db_session: Session):
-    """
-    Asynchronous background worker using a separate context-safe DB transaction.
-    """
+    db = db_session
     try:
-        db = db_session
         pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
-
         if pdf_record:
             pdf_record.status = "processing"
             db.commit()
@@ -36,14 +34,23 @@ def process_pdf_worker(pdf_id: int, file_path: str, db_session: Session):
             db.commit()
 
             chunks = PDFProcessorService.chunk_text(extracted_text, chunk_size=1000, chunk_overlap=200)
-            ai_summary = asyncio.run(LLMService.summarize_chunks(chunks))
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                print(f"DEBUG: Storing chunks in vector database for PDF ID {pdf_id}...")
+                loop.run_until_complete(store_chunks_in_qdrant(pdf_id, chunks))
+
+                print(f"DEBUG: Generating AI summary for PDF ID {pdf_id}...")
+                ai_summary = loop.run_until_complete(LLMService.summarize_chunks(chunks))
+            finally:
+                loop.close()
 
             pdf_record.summary = ai_summary
             pdf_record.status = "completed"
             db.commit()
 
     except Exception as e:
-        db = db_session
         pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
         if pdf_record:
             pdf_record.summary = f"Error occurred during background processing: {str(e)}"
@@ -57,9 +64,6 @@ async def upload_pdf(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """
-    Standard asynchronous background upload. Saves data to the DB and returns instantly.
-    """
     if not file.filename.endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -92,11 +96,10 @@ async def upload_pdf(
 
 
 @router.post("/upload/stream")
-async def upload_and_stream_summary(file: UploadFile = File(...)):
-    """
-    High-velocity streaming endpoint. Bypasses persistent database tracking
-    to stream tokens from Ollama straight to the client in real time.
-    """
+async def upload_and_stream_summary(
+    file: UploadFile = File(...),
+    custom_prompt: Optional[str] = Form(None)
+):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -110,7 +113,6 @@ async def upload_and_stream_summary(file: UploadFile = File(...)):
             while content := await file.read(1024 * 1024):
                 buffer.write(content)
                 
-        # 1. Process and Chunk the text inside the request thread
         extracted_text = PDFProcessorService.extract_text(file_path)
         chunks = PDFProcessorService.chunk_text(extracted_text, chunk_size=4000, chunk_overlap=400)
         
@@ -124,7 +126,7 @@ async def upload_and_stream_summary(file: UploadFile = File(...)):
         )
 
     return StreamingResponse(
-        LLMService.stream_summarize_chunks(chunks),
+        LLMService.stream_summarize_chunks(chunks, custom_prompt=custom_prompt),
         media_type="text/event-stream"
     )
 
@@ -134,9 +136,6 @@ async def get_pdf_status(
     pdf_id: int,
     db: Session = Depends(get_db)
 ):
-    """
-    Queries the current processing or completion status of an uploaded PDF file.
-    """
     pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
 
     if not pdf_record:
@@ -147,18 +146,20 @@ async def get_pdf_status(
     
     return pdf_record
 
-from pydantic import BaseModel
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 
 class ChatRequest(BaseModel):
     pdf_id: int
     question: str
+    history: Optional[List[ChatMessage]] = []
+
 
 @router.post("/chat")
 async def chat_with_pdf(payload: ChatRequest, db: Session = Depends(get_db)):
-    """
-    Exposes a conversation endpoint allowing users to ask specific questions
-    about an ingested PDF using local context matching.
-    """
     pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == payload.pdf_id).first()
     
     if not pdf_record or not pdf_record.raw_text:
@@ -167,25 +168,34 @@ async def chat_with_pdf(payload: ChatRequest, db: Session = Depends(get_db)):
             detail="Document context not found. Please upload and process the file first."
         )
         
-    document_context = pdf_record.raw_text[:12000]
+    relevant_chunks = await search_chunks_in_qdrant(pdf_id=payload.pdf_id, query_text=payload.question, limit=3)
+    document_context = "\n\n---\n\n".join(relevant_chunks) if relevant_chunks else "nothing relatable was found during the search..."
     
+    messages_payload = [
+        {
+            "role": "system",
+            "content": (
+                "You are an expert AI assistant conversing about a specific document.\n"
+                "Use the provided document context and previous conversation history to answer accurately.\n"
+                "If the answer cannot be found in the context, use your general knowledge but state clearly "
+                "that it is an inference outside the source text. Keep your responses precise and professional.\n\n"
+                f"Document Context:\n{document_context}"
+            )
+        }
+    ]
+
+    if payload.history:
+        for msg in payload.history[-6:]:
+            messages_payload.append({"role": msg.role, "content": msg.content})
+
+    messages_payload.append({
+        "role": "user",
+        "content": payload.question
+    })
+
     chat_payload = {
         "model": "llama3.2:3b",
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert AI assistant conversing about a specific document.\n"
-                    "Use the provided document context to answer the user's question accurately.\n"
-                    "If the answer cannot be found in the context, use your general knowledge but state clearly "
-                    "that it is an inference outside the source text. Keep your responses precise and professional."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"Context:\n{document_context}\n\nQuestion: {payload.question}"
-            }
-        ],
+        "messages": messages_payload,
         "options": {"temperature": 0.5},
         "stream": True
     }

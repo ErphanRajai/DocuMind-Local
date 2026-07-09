@@ -1,4 +1,4 @@
-```markdown
+
 # DocuMind-Local
 
 DocuMind-Local is an enterprise-grade, localized multi-container AI application designed to process, chunk, and summarize complex PDF documents without letting data leave your host machine. Featuring an asynchronous FastAPI backend paired with an interactive Streamlit UI, it handles both digital text parsing and scanned image layouts via a robust fallback OCR engine, leveraging an isolated local LLM orchestration framework.

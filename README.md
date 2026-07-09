@@ -1,146 +1,116 @@
 
-# DocuMind-Local
+# DocuMind-Local: Privacy-First Document AI & RAG Pipeline
 
-DocuMind-Local is an enterprise-grade, localized multi-container AI application designed to process, chunk, and summarize complex PDF documents without letting data leave your host machine. Featuring an asynchronous FastAPI backend paired with an interactive Streamlit UI, it handles both digital text parsing and scanned image layouts via a robust fallback OCR engine, leveraging an isolated local LLM orchestration framework.
+DocuMind-Local is an enterprise-grade, fully localized Retrieval-Augmented Generation (RAG) application designed to process, chunk, and summarize complex PDF documents. Built with a strict **zero-data-leakage philosophy**, this system ensures that your documents never leave your host machine. There are no API keys, no paywalls, and no external tracking—just a 100% free, secure, and private AI ecosystem running directly on your hardware.
 
----
+## Architecture Overview
 
-## 🏗️ Architecture Overview
+The application is engineered as a decoupled, high-performance environment, separating the heavy ML inference from the service orchestration to maximize GPU efficiency:
 
-The application is engineered as a decoupled, multi-service environment orchestrated entirely via Docker:
+* **Host-Native LLM Engine (Ollama):** Removed from the Docker network to run natively on the host OS. This architectural decision bypasses Docker's virtualization layer, granting the AI models direct, unhindered access to native GPU drivers (Nvidia/Apple Silicon) for maximum inference speed.
+* **Vector Storage Engine (Qdrant):** A dedicated, containerized vector database that stores high-dimensional embeddings. It powers the semantic search capabilities of the RAG pipeline, ensuring the LLM has accurate, mathematically grounded context for every query.
+* **Backend API (FastAPI):** An asynchronous orchestration layer handling PDF processing, advanced text-chunking algorithms, vector indexing, and fallback OCR capabilities (via Tesseract) for scanned documents.
+* **Frontend UI (Streamlit):** An interactive dashboard providing drag-and-drop file uploaders, real-time token streaming, and an intuitive conversational interface.
 
-* **Frontend UI (Streamlit):** Provides an interactive dashboard, drag-and-drop file uploaders, and an asynchronous conversational chat window.
-* **Backend API (FastAPI):** Orchestrates PDF processing, manages local storage paths, handles SQLite database states, and coordinates chunks via custom text-splitting metrics.
-* **Local LLM Node (Ollama):** A dedicated Linux-based container managing neural model states and serving token streaming pipes internally without external API dependencies.
-* **OCR Layer (Tesseract):** Automated system-level pipeline that kicks in whenever a document lacks a native digital text layer.
-
----
-
-## 🚀 Getting Started
-
-Follow these instructions to spin up the entire ecosystem on your local machine.
-
-### 📋 Prerequisites
+## Prerequisites
 
 Ensure you have the following installed on your host system:
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-* Python 3.10+ (if running the frontend natively outside Docker)
+* **Docker Desktop** (For orchestrating the backend and vector database)
+* **Python 3.10+** (For running the Streamlit client)
+* **Ollama** (For local LLM and embedding generation)
 
-> **⚠️ Network Note for Restricted Regions:** If you are running this from a country with Docker Hub access restrictions (e.g., Iran), ensure your system proxy/VPN is active before building the containers to prevent `403 Forbidden` connection drops during base image registration.
+> **Network Note for Restricted Regions:** If you are running this entirely entirely behind a strict firewall or in a region with Docker Hub access restrictions, ensure your system proxy/VPN is active during the initial Docker build to prevent `403 Forbidden` errors.
 
----
+## Installation & Setup
 
-### 🛠️ Installation & Setup
+### Step 1: Initialize the Local AI Engine
+To ensure maximum performance and native hardware acceleration, install Ollama directly on your machine rather than inside a container.
 
-#### 1. Clone and Navigate to the Workspace
+1. Download and install Ollama from [ollama.com](https://ollama.com).
+2. Open your host terminal and pull the required models into your local cache. We use Llama 3.2 for summarization/chat and Nomic for vector embeddings:
+
+```bash
+ollama pull llama3.2
+ollama pull nomic-embed-text
+```
+
+### Step 2: Clone the Repository
+
 ```bash
 git clone [https://github.com/ErphanRajai/DocuMind-Local.git](https://github.com/ErphanRajai/DocuMind-Local.git)
 cd DocuMind-Local
 
 ```
 
-#### 2. Launch the Core Infrastructure (Backend & AI Engine)
+### Step 3: Launch the Core Infrastructure
 
-Run Docker Compose from the root directory to build the core services. This setup automatically configures the volumes and triggers an automated script container to download the `llama3.2:3b` model weights directly into your Docker storage layer.
+Run Docker Compose from the root directory to build the FastAPI backend and Qdrant vector database. The backend is configured to automatically bridge the container network to your host machine's Ollama instance via `host.docker.internal`.
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 
 ```
 
-To verify that the infrastructure is up and healthy, run:
+*Note: To shut down the infrastructure later, use `docker compose down`.*
 
-```bash
-docker ps
+### Step 4: Initialize the Frontend Interface
 
-```
+Open a **new, separate terminal window**, navigate to the frontend directory, and set up your Python environment.
 
-You should see `pdf_backend` listening on port `8888` and `ollama_node` listening on port `11434`.
-
-#### 3. Initialize the Frontend Interface
-
-Open a **new, separate terminal window** and navigate to the frontend directory:
+#### Option A: Using standard venv (Windows/Mac/Linux)
 
 ```bash
 cd pdf-summarizer-frontend
-
-```
-
-Choose the environment setup option that matches your local system configuration below:
-
-##### Option A: Using a Standard Python Virtual Environment (Windows / Mac / Linux)
-
-```bash
-# 1. Create the virtual environment
 python -m venv front_env
 
-# 2. Activate the environment
-# For Windows (PowerShell):
+# Windows (PowerShell):
 front_env\Scripts\activate
-# For Mac / Linux:
+# Mac / Linux:
 source front_env/bin/activate
 
-# 3. Install core client dependencies
 pip install streamlit httpx
-
-# 4. Boot the app interface
 streamlit run app.py --server.port 8550 --server.address 127.0.0.1
 
 ```
 
-##### Option B: Using an Anaconda / Miniconda Environment
+#### Option B: Using Anaconda / Miniconda
 
 ```bash
-# 1. Activate your conda base environment (or your preferred named env)
-conda activate base
+cd pdf-summarizer-frontend
+conda activate base # Or your dedicated conda env
 
-# 2. Install core client dependencies
 pip install streamlit httpx
-
-# 3. Boot the app interface
 streamlit run app.py --server.port 8550 --server.address 127.0.0.1
 
 ```
 
-Once the application initializes, your web browser will automatically open to:
-👉 **`http://127.0.0.1:8550`**
+Your web browser will automatically open to: **`http://127.0.0.1:8550`**
 
----
+## Verification Protocol (How to Test)
 
-## 🧪 Verification Protocol (How to Test)
+1. **Vector Indexing & RAG:** Upload a standard, text-selectable PDF. The backend will automatically parse the document, generate chunks, extract semantic embeddings via `nomic-embed-text`, and index them into Qdrant.
+2. **Scanned PDF Fallback (OCR):** Upload a purely image-based PDF. The backend will automatically detect the missing digital layer, trigger the Tesseract OCR engine, extract the text, and proceed with the RAG pipeline.
+3. **Conversational AI:** Use the chat interface to ask specific questions about the uploaded document. The system will query the Qdrant database for the most relevant vectors and stream the synthesized answer back to the UI in real-time.
 
-1. **Digital Document Streaming:** Upload a standard text-selectable PDF and click **"Process & Summarize Document"**. The text will chunk automatically, save to the local SQL state, and stream the summary token-by-token down the chat window.
-2. **Scanned PDF Fallback (OCR):** Upload a document that is purely a scanned image or photo. The backend will catch the empty layer, print `DEBUG: Digital text layer missing. Launching OCR...` in your Docker console, parse the pixels using Tesseract, and return a clean textual summary.
-3. **Conversational Follow-up:** Type a contextual prompt in the bottom chat interface (e.g., *"What was the exact percentage mentioned in section 2?"*) to test the persistent memory/RAG layer.
-
----
-
-## 📂 Project Structure
+## Project Structure
 
 ```text
 DocuMind-Local/
-│
 ├── pdf-summarizer-backend/     # FastAPI Service Layer
-│   ├── app/                    # Endpoints, Services, & Database Models
-│   ├── tests/                  # Isolated Test Harnesses / Sanity Scripts
-│   └── Dockerfile              # Linux compilation template (Python + Tesseract)
-│
+│   ├── app/                    # Routing, LLM Services, and RAG Logic
+│   └── Dockerfile              # Container compilation template (Python + Tesseract)
 ├── pdf-summarizer-frontend/    # Streamlit User Workspace
-│   └── app.py                  # UI layout and network streaming pipelines
-│
-├── docker-compose.yml          # Global multi-service orchestration layout
-└── .gitignore                  # Active tracking exceptions (Blocks local environments/DBs)
+│   └── app.py                  # UI layout and async network streaming pipelines
+├── docker-compose.yml          # Container orchestration (FastAPI + Qdrant)
+└── .gitignore                  # Active tracking exceptions (Blocks databases/environments)
 
 ```
 
----
+## Security & Best Practices
 
-## 🔒 Security & Best Practices
-
-* **No Hardcoded Secrets:** All system routing parameters use flexible environment definitions (`os.getenv`), falling back to local loops if empty.
-* **Strict Volumetric Mapping:** Active databases (`pdf_summarizer.db`) and target PDF assets stay locked inside isolated volumes, completely filtered out of remote Git records via structural ignore parameters.
-
----
+* **Air-Gapped Capability:** Once the Docker images and Ollama models are cached locally, this application requires zero internet connection to function.
+* **Volume Isolation:** The Qdrant vector database is mapped to a strictly isolated local volume (`qdrant_storage`), which is ignored by Git to prevent accidental leakage of proprietary document data.
+* **Dynamic Routing:** All API cross-talk is handled via environment variables (`OLLAMA_API_URL`, `QDRANT_HOST`), preventing hardcoded vulnerability vectors.
 
 ```
 

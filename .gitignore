@@ -22,3 +22,4 @@ Thumbs.db
 ollama_storage/"qdrant_storage/" 
 "documind_sessions.json" 
 "pdf-summarizer-frontend/documind_sessions.json" 
+"ollama_storage/" 

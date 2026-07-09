@@ -43,19 +43,26 @@ services:
               capabilities: [gpu]
 
   ollama_model_puller:
-      image: alpine:latest
-      container_name: ollama_init
-      depends_on:
-        - ollama_service
-      entrypoint: >
-        sh -c "apk add --no-cache curl &&
-               echo 'Waiting for Ollama to boot...' &&
-               while ! curl -s http://ollama_service:11434/api/tags > /dev/null; do sleep 2; done &&
-               echo 'Pulling Llama 3.2 model weights (this will take 10-15 minutes)...' &&
-              curl -f -s -X POST http://ollama_service:11434/api/pull -H 'Content-Type: application/json' -d '{\"name\": \"llama3.2:3b\", \"stream\": false}' &&
-              echo 'Pulling Nomic Embed Text model weights...' &&
-              curl -f -s -X POST http://ollama_service:11434/api/pull -H 'Content-Type: application/json' -d '{\"name\": \"nomic-embed-text\", \"stream\": false}' &&
-              echo 'All models fully cached!'"
+    image: alpine:latest
+    container_name: ollama_init
+    depends_on:
+      - ollama_service
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache curl
+        echo "Waiting for Ollama to boot..."
+        while ! curl -s http://ollama_service:11434/api/tags > /dev/null; do sleep 2; done
+        
+        echo "Pulling Llama 3.2 model weights (this will take 10-15 minutes)..."
+        curl -f -sS -X POST http://ollama_service:11434/api/pull -H "Content-Type: application/json" -d '{"name": "llama3.2", "stream": false}'
+        
+        echo "Pulling Nomic Embed Text model weights..."
+        curl -f -sS -X POST http://ollama_service:11434/api/pull -H "Content-Type: application/json" -d '{"name": "nomic-embed-text", "stream": false}'
+        
+        echo "All models fully cached!"
+
   qdrant_service:
     image: qdrant/qdrant:latest
     container_name: qdrant_node

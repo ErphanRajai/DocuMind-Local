@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from datetime import datetime
+from pydantic import ConfigDict
 
 class PDFDocumentBase(BaseModel):
     """
@@ -27,8 +28,7 @@ class PDFDocumentResponse(PDFDocumentBase):
     summary : Optional[str] = None
     created_at : datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatMessage(BaseModel):
     role:str

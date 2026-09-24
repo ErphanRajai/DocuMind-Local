@@ -1,30 +1,37 @@
 services:
+  qdrant_service:
+    image: qdrant/qdrant:latest
+    container_name: documind_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
   pdf_backend:
     build:
       context: ./pdf-summarizer-backend
       dockerfile: Dockerfile
-    container_name: pdf_backend
+    container_name: documind_backend
     ports:
-      - "8888:8888"
+      - "8888"
     environment:
       - OLLAMA_API_URL=http://host.docker.internal:11434/api/chat
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_CHAT_MODEL=llama3.2:3b
+      - OLLAMA_EMBED_MODEL=nomic-embed-text
+      - EMBED_VECTOR_DIM=768
       - QDRANT_HOST=qdrant_service
       - QDRANT_PORT=6333
+      - MAX_UPLOAD_MB=50
+      - DB_URL=sqlite:////workspace/db_data/pdf_summarizer.db
     volumes:
       - ./pdf-summarizer-backend/app:/workspace/app
       - ./db_data:/workspace/db_data
       - ./uploaded_pdfs:/workspace/uploaded_pdfs
     depends_on:
-      qdrant_service:
-        condition: service_started
-    restart: always
-
-  qdrant_service:
-    image: qdrant/qdrant:latest
-    container_name: qdrant_node
-    ports:
-      - "6333:6333"
-      - "6343:6343"
-    volumes:
-      - ./qdrant_storage:/qdrant/storage
-    restart: always
+      - qdrant_service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

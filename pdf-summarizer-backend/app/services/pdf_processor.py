@@ -1,90 +1,96 @@
+import logging
 import os
+import re
+from typing import List
+
+import fitz  # PyMuPDF
 from pdf2image import convert_from_path
 import pytesseract
-from fitz import open as open_pdf 
+
+logger = logging.getLogger(__name__)
+
 
 class PDFProcessorService:
-
     @staticmethod
     def extract_text(file_path: str) -> str:
         """
-        Hybrid Extraction Engine:
-        Attempts standard digital text layer extraction first.
-        If the page contains zero readable text, it falls back to a local OCR scan.
+        Robust text extraction pipeline:
+        1. Direct PyMuPDF text & block extraction.
+        2. Automatic OCR fallback with pdf2image + pytesseract if text density is low.
         """
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Target PDF file path not found: {file_path}")
-
-        full_extracted_text = []
+        raw_text_parts = []
 
         try:
-            with open_pdf(file_path) as doc:
-                for page_num in range(len(doc)):
-                    page_text = doc[page_num].get_text().strip()
-                    
-                    if len(page_text) > 50:
-                        # Digital text layer exists for this page
-                        full_extracted_text.append(page_text)
-                    else:
-                        # Page is likely a scanned image. Trigger fallback OCR for this specific page.
-                        print(f"DEBUG: Digital text layer missing or empty on Page {page_num + 1}. Launching OCR...")
-                        page_ocr_text = PDFProcessorService._ocr_single_page(file_path, page_num)
-                        full_extracted_text.append(page_ocr_text)
-
+            doc = fitz.open(file_path)
+            for page in doc:
+                text = page.get_text("text")
+                if text and text.strip():
+                    raw_text_parts.append(text.strip())
+                else:
+                    # Fallback to block-level extraction for complex layouts
+                    blocks = page.get_text("blocks")
+                    block_text = "\n".join([b[4] for b in blocks if len(b) > 4 and isinstance(b[4], str)])
+                    if block_text.strip():
+                        raw_text_parts.append(block_text.strip())
         except Exception as e:
-            print(f"DEBUG: Digital extraction encountered error, attempting complete file OCR fallback: {str(e)}")
-            return PDFProcessorService._ocr_entire_pdf(file_path)
+            logger.warning(f"PyMuPDF parser warning on {file_path}: {e}")
 
-        return "\n\n".join(full_extracted_text)
+        extracted_content = "\n\n".join(raw_text_parts).strip()
+
+        # If extracted text is empty or sparse (< 80 characters), execute Tesseract OCR
+        if len(extracted_content) < 80:
+            logger.info(f"Low text density ({len(extracted_content)} chars). Running OCR fallback on {file_path}...")
+            try:
+                images = convert_from_path(file_path, dpi=200)
+                ocr_results = []
+                for img in images:
+                    page_ocr = pytesseract.image_to_string(img)
+                    if page_ocr.strip():
+                        ocr_results.append(page_ocr.strip())
+                extracted_content = "\n\n".join(ocr_results).strip()
+            except Exception as ocr_err:
+                logger.error(f"OCR fallback error on {file_path}: {ocr_err}")
+
+        # Clean academic/trailing bibliography if present in the latter 60% of text
+        ref_patterns = [
+            r"\nReferences\s*\n",
+            r"\nREFERENCES\s*\n",
+            r"\nBibliography\s*\n",
+        ]
+
+        split_pos = -1
+        for pattern in ref_patterns:
+            match = re.search(pattern, extracted_content)
+            if match:
+                split_pos = match.start()
+                break
+
+        if split_pos != -1 and split_pos > (len(extracted_content) * 0.4):
+            return extracted_content[:split_pos].strip()
+
+        return extracted_content.strip()
 
     @staticmethod
-    def _ocr_single_page(file_path: str, page_number: int) -> str:
-        """
-        Converts a single specific PDF page into a high-res image and runs Tesseract OCR.
-        """
-        try:
-            images = convert_from_path(
-                file_path, 
-                dpi=300, 
-                first_page=page_number + 1, 
-                last_page=page_number + 1
-            )
-            if images:
-                # Pass raw PIL Image memory directly to Tesseract
-                ocr_text = pytesseract.image_to_string(images[0])
-                return ocr_text.strip()
-        except Exception as e:
-            print(f"ERROR: OCR failed on page {page_number + 1}: {str(e)}")
-        return ""
-
-    @staticmethod
-    def _ocr_entire_pdf(file_path: str) -> str:
-        """
-        Total fallback method if the entire file object breaks standard parsing.
-        """
-        print("DEBUG: Initiating full document image-to-text processing loop...")
-        ocr_text_list = []
-        try:
-            images = convert_from_path(file_path, dpi=200) # Slightly lower DPI for speed on long full fallbacks
-            for i, img in enumerate(images):
-                text = pytesseract.image_to_string(img)
-                ocr_text_list.append(text)
-        except Exception as e:
-            print(f"CRITICAL: Structural OCR breakdown: {str(e)}")
-        return "\n\n".join(ocr_text_list)
-
-    @staticmethod
-    def chunk_text(text: str, chunk_size: int = 4000, chunk_overlap: int = 400) -> list[str]:
-        """
-        Keeps your existing chunking logic intact.
-        """
-        if not text:
+    def chunk_text(text: str, chunk_size: int = 4000, chunk_overlap: int = 300) -> List[str]:
+        """Splits extracted text into chunks optimized for semantic search and LLM context."""
+        if not text or not text.strip():
             return []
-        
+
+        clean_text = text.strip()
+        if len(clean_text) <= chunk_size:
+            return [clean_text]
+
         chunks = []
         start = 0
-        while start < len(text):
-            end = start + chunk_size
-            chunks.append(text[start:end])
+        text_len = len(clean_text)
+
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+            chunk = clean_text[start:end]
+            chunks.append(chunk)
+
+            if end == text_len:
+                break
             start += chunk_size - chunk_overlap
+
         return chunks

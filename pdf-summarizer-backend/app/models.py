@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, Text, DateTime
-from datetime import datetime
+from datetime import datetime, timezone
 from .database import Base
 
 class PDFDocument(Base):
@@ -15,4 +15,4 @@ class PDFDocument(Base):
     summary = Column(Text, nullable=True)
 
     status = Column(String, default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

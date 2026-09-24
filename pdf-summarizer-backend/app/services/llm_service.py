@@ -1,163 +1,132 @@
-import httpx
 import json
-from typing import AsyncGenerator, Optional
+import logging
 import os
+from typing import AsyncGenerator, List, Optional
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
 
 class LLMService:
+    CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.2:3b")
+    EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
     API_URL = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434/api/chat")
+    EMBED_URL = os.getenv("OLLAMA_EMBED_URL", "http://host.docker.internal:11434/api/embeddings")
+    TAGS_URL = os.getenv("OLLAMA_TAGS_URL", "http://host.docker.internal:11434/api/tags")
 
-    MAP_SYSTEM_PROMPT = (
-        "You are an elite AI Senior Research Scientist and Technical Analyst.\n"
-        "Your task is to analyze the provided document extract and distill its core intelligence.\n\n"
-        "ENFORCE STRICT MARKDOWN FORMATTING:\n"
-        "- Use **Bold Text** for all critical entities, metrics, technical terminology, and dates.\n"
-        "- Format findings into clean analytical paragraphs paired with high-density bullet points.\n"
-        "- Never write walls of plain text. Keep paragraphs concise (2-3 sentences max).\n"
-        "- Do NOT add conversational filler like 'Here is the summary' or 'Based on the text'."
-    )
+    # Recommended verified models for local RAG & technical analysis
+    RECOMMENDED_MODELS = [
+        {"name": "llama3.2:3b", "desc": "Lightweight & Fast (Meta)", "url": "https://ollama.com/library/llama3.2"},
+        {"name": "llama3.1:8b", "desc": "Balanced Accuracy (Meta)", "url": "https://ollama.com/library/llama3.1"},
+        {"name": "qwen2.5:7b", "desc": "High Technical Precision (Alibaba)", "url": "https://ollama.com/library/qwen2.5"},
+        {"name": "mistral:7b", "desc": "Instruction Following (Mistral)", "url": "https://ollama.com/library/mistral"},
+        {"name": "deepseek-r1:8b", "desc": "Deep Reasoning & Analysis", "url": "https://ollama.com/library/deepseek-r1"},
+        {"name": "phi4:14b", "desc": "High Logic & Math Capacity (Microsoft)", "url": "https://ollama.com/library/phi4"},
+    ]
 
-    REDUCE_SYSTEM_PROMPT = (
-        "You are a Principal AI Executive Strategist producing a State-of-the-Art (SOTA) Intelligence Briefing.\n"
-        "Synthesize the provided text into an executive-ready, highly structured analytical document.\n\n"
-        "MANDATORY DOCUMENT STRUCTURE (Use exact Markdown headings):\n\n"
-        "### 💎 Executive Synthesis\n"
-        "Write a powerful, authoritative 2-paragraph summary capturing the overarching theme, objective, and paradigm shift.\n\n"
-        "### ⚡ Key Strategic & Technical Breakthroughs\n"
-        "Provide a detailed bulleted list. Start each bullet with a **Bold Action Concept** followed by a deep analytical explanation.\n\n"
-        "### 📊 Analytical Implications & Next Steps\n"
-        "Conclude with a structured paragraph evaluating practical applications, limitations, or future trajectories.\n\n"
-        "FORMATTING LAWS:\n"
-        "- Use rich Markdown rendering (headers, bold emphasis, blockquotes `>` for critical takeaways).\n"
-        "- Maintain an academic yet executive, highly authoritative tone."
-    )
-
-    @staticmethod
-    async def summarize_chunks(chunks: list[str]) -> str:
-        """Non-streaming Map-Reduce summarization for background processing."""
-        all_section_summaries = []
-        
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            for i, chunk in enumerate(chunks):
-                payload = {
-                    "model": "llama3.2:3b",
-                    "messages": [
-                        {"role": "system", "content": LLMService.MAP_SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Analyze and extract key intelligence from this section:\n\n{chunk}"}
-                    ],
-                    "options": {"temperature": 0.3},
-                    "stream": False
-                }
-                try:
-                    response = await client.post(LLMService.API_URL, json=payload)
-                    if response.status_code == 200:
-                        all_section_summaries.append(response.json().get("message", {}).get("content", ""))
-                except Exception as e:
-                    print(f"DEBUG: Map exception for chunk {i+1}: {str(e)}")
-            
-            if not all_section_summaries:
-                return "Error in making the summary..."
-                
-            reduced_context = "\n\n---\n\n".join(all_section_summaries)
-            
-            reduce_payload = {
-                "model": "llama3.2:3b",
-                "messages": [
-                    {"role": "system", "content": LLMService.REDUCE_SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Synthesize these extracted section notes into a master SOTA Executive Briefing:\n\n{reduced_context}"}
-                ],
-                "options": {"temperature": 0.4},
-                "stream": False
-            }
+    @classmethod
+    async def get_available_models(cls) -> List[str]:
+        """Fetches all installed Ollama models from the local instance."""
+        async with httpx.AsyncClient(timeout=5.0) as client:
             try:
-                response = await client.post(LLMService.API_URL, json=reduce_payload)
-                if response.status_code == 200:
-                    return response.json().get("message", {}).get("content", "")
+                resp = await client.get(cls.TAGS_URL)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [m.get("name") for m in data.get("models", []) if m.get("name")]
+                    return models if models else [cls.CHAT_MODEL]
             except Exception as e:
-                print(f"DEBUG: Reduce phase exception: {str(e)}")
-                
-            return reduced_context
+                logger.warning(f"Failed to fetch Ollama model tags: {e}")
+        return [cls.CHAT_MODEL]
 
-    @staticmethod
-    async def stream_summarize_chunks(chunks: list[str], custom_prompt: Optional[str] = None) -> AsyncGenerator[str, None]:
-        """Adaptive streaming summarization pipeline with SOTA formatting."""
-        total_word_count = sum(len(c.split()) for c in chunks)
-        full_text_joined = "\n\n".join(chunks)
+    @classmethod
+    async def get_embedding(cls, text: str) -> List[float]:
+        payload = {"model": cls.EMBED_MODEL, "prompt": text}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(cls.EMBED_URL, json=payload)
+            if resp.status_code == 200:
+                return resp.json().get("embedding", [])
+            raise RuntimeError(f"Embedding failure: {resp.text}")
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            if total_word_count < 2500 or custom_prompt:
-                system_instruction = (
-                    custom_prompt if custom_prompt else LLMService.REDUCE_SYSTEM_PROMPT
-                )
-                payload = {
-                    "model": "llama3.2:3b",
-                    "messages": [
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": f"Document Text to Synthesize:\n\n{full_text_joined[:12000]}"}
-                    ],
-                    "options": {"temperature": 0.35},
-                    "stream": True
-                }
-                try:
-                    async with client.stream("POST", LLMService.API_URL, json=payload) as response:
-                        if response.status_code == 200:
-                            async for line in response.aiter_lines():
-                                if line:
-                                    data = json.loads(line)
-                                    yield data.get("message", {}).get("content", "")
-                        else:
-                            yield f"[Error: Local Ollama returned status {response.status_code}]"
-                except Exception as e:
-                    yield f"[Connection Error: {str(e)}]"
-                return
+    @classmethod
+    async def stream_summarize_chunks(
+        cls,
+        chunks: List[str],
+        custom_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Executive Document Summarizer with zero-refusal prompt structures.
+        """
+        if not chunks:
+            yield "No readable text could be extracted from the document."
+            return
 
-            all_section_summaries = []
-            for i, chunk in enumerate(chunks):
-                current_chunk_summary = ""
-                payload = {
-                    "model": "llama3.2:3b",
-                    "messages": [
-                        {"role": "system", "content": LLMService.MAP_SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Extract key intelligence from this section:\n\n{chunk}"}
-                    ],
-                    "options": {"temperature": 0.3},
-                    "stream": True
-                }
-                try:
-                    async with client.stream("POST", LLMService.API_URL, json=payload) as response:
-                        if response.status_code == 200:
-                            async for line in response.aiter_lines():
-                                if line:
-                                    data = json.loads(line)
-                                    token = data.get("message", {}).get("content", "")
-                                    yield token
-                                    current_chunk_summary += token
-                            all_section_summaries.append(current_chunk_summary)
-                            yield "\n\n---\n\n"
-                        else:
-                            yield f"\n\n[Error: Local Ollama returned status {response.status_code}]\n\n"
-                except Exception as e:
-                    yield f"\n\n[Connection Error: {str(e)}]\n\n"
+        if len(chunks) == 1:
+            selected_text = chunks[0]
+        elif len(chunks) == 2:
+            selected_text = f"{chunks[0]}\n\n---\n\n{chunks[1]}"
+        elif len(chunks) == 3:
+            selected_text = f"{chunks[0]}\n\n---\n\n{chunks[1]}\n\n---\n\n{chunks[2]}"
+        else:
+            selected_text = (
+                f"[DOCUMENT_HEAD]\n{chunks[0]}\n\n"
+                f"[DOCUMENT_CORE]\n{chunks[1]}\n\n"
+                f"[DOCUMENT_CONCLUSION]\n{chunks[-1]}"
+            )
 
-            if len(all_section_summaries) > 1:
-                yield "\n\n> ⏳ **Compiling Master SOTA Executive Synthesis...**\n\n---\n\n"
-                reduced_context = "\n\n".join(all_section_summaries)
-                reduce_payload = {
-                    "model": "llama3.2:3b",
-                    "messages": [
-                        {"role": "system", "content": LLMService.REDUCE_SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Synthesize these extracted section notes into a master SOTA Executive Briefing:\n\n{reduced_context}"}
-                    ],
-                    "options": {"temperature": 0.4},
-                    "stream": True
-                }
-                try:
-                    async with client.stream("POST", LLMService.API_URL, json=reduce_payload) as response:
-                        if response.status_code == 200:
-                            async for line in response.aiter_lines():
-                                if line:
-                                    data = json.loads(line)
-                                    yield data.get("message", {}).get("content", "")
-                        else:
-                            yield f"\n\n[Error compiling executive summary: Status {response.status_code}]\n\n"
-                except Exception as e:
-                    yield f"\n\n[Reduce Synthesis Connection Error: {str(e)}]\n\n"
+        truncated_context = selected_text[:14000]
+        target_model = model if model else cls.CHAT_MODEL
+
+        user_directive = custom_prompt.strip() if (custom_prompt and custom_prompt.strip()) else (
+            "Provide a comprehensive, structured technical breakdown covering the background, core details, achievements, and key findings."
+        )
+
+        system_instruction = (
+            "You are DocuMind, an elite AI document analysis engine. "
+            "You have direct access to the raw extracted document content provided below. "
+            "Never claim you cannot view, open, or access files. Analyze and answer directly using the provided text."
+        )
+
+        user_content = (
+            f"=== EXTRACTED SOURCE CONTENT ===\n{truncated_context}\n\n"
+            f"=== INSTRUCTION ===\n{user_directive}"
+        )
+
+        payload = {
+            "model": target_model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_content}
+            ],
+            "options": {
+                "num_ctx": 8192,
+                "temperature": 0.2,
+                "num_predict": 850,
+            },
+            "stream": True,
+        }
+
+        client_timeout = httpx.Timeout(connect=20.0, read=None, write=300.0, pool=60.0)
+        async with httpx.AsyncClient(timeout=client_timeout) as client:
+            try:
+                async with client.stream("POST", cls.API_URL, json=payload) as response:
+                    if response.status_code == 200:
+                        async for line in response.aiter_lines():
+                            if line:
+                                data = json.loads(line)
+                                token = data.get("message", {}).get("content", "")
+                                yield token
+                    elif response.status_code == 404:
+                        yield f"[Backend Error: Model '{target_model}' is not pulled in Ollama. Run 'ollama run {target_model}' in terminal to install it.]"
+                    else:
+                        yield f"[Inference Server Error: HTTP {response.status_code}]"
+            except Exception as e:
+                yield f"[Connection Error: {str(e)}]"
+
+    @classmethod
+    async def summarize_chunks(cls, chunks: List[str], model: Optional[str] = None) -> str:
+        summary = ""
+        async for token in cls.stream_summarize_chunks(chunks, model=model):
+            summary += token
+        return summary

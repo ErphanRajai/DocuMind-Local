@@ -1,12 +1,13 @@
+import os
+
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-
-SQLALCHEMY_DATABSE_URL = "sqlite:////workspace/db_data/pdf_summarizer.db"
+DEFAULT_DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pdf_summarizer.db"))
+SQLALCHEMY_DATABASE_URL = os.getenv("DB_URL", f"sqlite:///{DEFAULT_DB_PATH}")
 
 engine = create_engine(
-    url = SQLALCHEMY_DATABSE_URL, connect_args={"check_same_thread":False}
+    url=SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -20,6 +21,6 @@ def get_db():
     """
     db = SessionLocal()
     try:
-        yield db 
+        yield db
     finally:
         db.close()

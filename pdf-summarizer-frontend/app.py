@@ -1,296 +1,50 @@
 import hashlib
+import html
 import json
 import os
-import re
-import subprocess
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 import streamlit as st
 
-st.set_page_config(page_title="DOCUMIND", layout="wide")
+st.set_page_config(page_title="DocuMind", page_icon="✦", layout="wide", initial_sidebar_state="auto")
 
-# Modern Monospace Visual Architecture & Styled Indicators
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,600;0,700;1,400&display=swap');
-
-    html, body, p, span:not([data-testid="stIconMaterial"]), div:not([data-testid="stIconMaterial"]), button, input, textarea {
-        font-family: 'JetBrains Mono', monospace !important;
-    }
-
-    .stApp {
-        background-color: #0c0d0e;
-        color: #d1d5db;
-    }
-
-    button[data-testid="stSidebarCollapseButton"] span,
-    button[data-testid="stSidebarHeaderCollapseButton"] span,
-    [data-testid="stIconMaterial"] {
-        font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
-        font-style: normal;
-        text-transform: none;
-    }
-
-    section[data-testid="stSidebar"] {
-        background-color: #080808 !important;
-        border-right: 1px solid #1f2428;
-    }
-
-    h1, h2, h3, h4, h5, h6 {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-weight: 700 !important;
-        color: #f3f4f6 !important;
-        letter-spacing: -0.5px;
-    }
-
-    div[data-testid="stChatMessageAvatarUser"],
-    div[data-testid="stChatMessageAvatarAssistant"],
-    .stChatMessage [data-testid="stChatMessageAvatar"] {
-        display: none !important;
-    }
-
-    .stChatMessage {
-        background-color: transparent !important;
-        border: none !important;
-        padding: 0 !important;
-        margin-bottom: 0.35rem !important;
-        display: flex !important;
-        width: 100% !important;
-    }
-
-    .stChatMessage > div:nth-child(2) {
-        padding: 0.9rem 1.2rem !important;
-        border-radius: 4px !important;
-        font-size: 0.90rem !important;
-        line-height: 1.6 !important;
-    }
-
-    div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarUser"]),
-    .stChatMessage:has([aria-label*="user"]) {
-        flex-direction: row-reverse !important;
-    }
-
-    div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarUser"]) > div:nth-child(2),
-    .stChatMessage:has([aria-label*="user"]) > div:nth-child(2) {
-        max-width: 75% !important;
-        width: auto !important;
-        background-color: #16181d !important;
-        border: 1px solid #272a30 !important;
-        color: #e2e8f0 !important;
-        margin-left: auto !important;
-        text-align: left !important;
-    }
-
-    div[data-testid="stChatMessage"]:has(div[data-testid="stChatMessageAvatarAssistant"]) > div:nth-child(2),
-    .stChatMessage:has([aria-label*="assistant"]) > div:nth-child(2) {
-        max-width: 88% !important;
-        width: auto !important;
-        background-color: #0e1013 !important;
-        border: 1px solid #1a1d23 !important;
-        border-left: 2px solid #3b82f6 !important;
-        color: #d1d5db !important;
-        margin-right: auto !important;
-    }
-
-    /* Horizontal Slideable PDF Attachment Carousel */
-    .pdf-card-container {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        overflow-x: auto !important;
-        gap: 8px !important;
-        margin-bottom: 10px !important;
-        padding-bottom: 6px !important;
-        scrollbar-width: thin !important;
-        scrollbar-color: #27272a transparent !important;
-        -webkit-overflow-scrolling: touch !important;
-        max-width: 100% !important;
-    }
-
-    .pdf-card-container::-webkit-scrollbar {
-        height: 4px !important;
-    }
-
-    .pdf-card-container::-webkit-scrollbar-thumb {
-        background: #27272a !important;
-        border-radius: 2px !important;
-    }
-
-    .pdf-badge {
-        flex: 0 0 auto !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-        background: #111317 !important;
-        border: 1px solid #2c313a !important;
-        border-radius: 4px !important;
-        padding: 4px 10px !important;
-        font-size: 0.75rem !important;
-        color: #e2e8f0 !important;
-        max-width: 260px !important;
-        box-sizing: border-box !important;
-    }
-
-    .pdf-icon {
-        color: #ef4444 !important;
-        font-weight: 800 !important;
-        font-size: 0.72rem !important;
-        background: rgba(239, 68, 68, 0.15) !important;
-        padding: 1px 4px !important;
-        border-radius: 2px !important;
-        flex-shrink: 0 !important;
-    }
-
-    .pdf-name {
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-        display: inline-block !important;
-    }
-
-    /* Model Hub and Cards Styling */
-    .model-card {
-        background: #101216;
-        border: 1px solid #22262e;
-        border-radius: 3px;
-        padding: 6px 8px;
-        margin-bottom: 6px;
-        font-size: 0.73rem;
-    }
-    .model-card b {
-        color: #93c5fd;
-    }
-    .model-card .desc {
-        color: #71717a;
-        margin: 2px 0 4px 0;
-        font-size: 0.68rem;
-    }
-    .model-card a {
-        color: #60a5fa !important;
-        text-decoration: none;
-        font-weight: 600;
-    }
-    .model-card a:hover {
-        text-decoration: underline;
-    }
-
-    .pipeline-status {
-        font-size: 0.78rem !important;
-        color: #93c5fd !important;
-        background: rgba(15, 23, 42, 0.55) !important;
-        border: 1px dashed rgba(59, 130, 246, 0.35) !important;
-        padding: 8px 12px !important;
-        border-radius: 4px !important;
-        margin-bottom: 10px !important;
-        display: flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        animation: pulse 1.8s infinite ease-in-out !important;
-    }
-
-    @keyframes pulse {
-        0% { opacity: 0.6; }
-        50% { opacity: 0.95; }
-        100% { opacity: 0.6; }
-    }
-
-    .stButton > button {
-        font-family: 'JetBrains Mono', monospace !important;
-        border-radius: 2px !important;
-        border: 1px solid #27272a !important;
-        background-color: #121316 !important;
-        color: #a1a1aa !important;
-        font-size: 0.78rem !important;
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-        display: block !important;
-        text-align: left !important;
-        padding: 0.25rem 0.5rem !important;
-        transition: all 0.15s ease-in-out;
-    }
-
-    .stButton > button:hover {
-        border-color: #3b82f6 !important;
-        color: #ffffff !important;
-        background-color: #18191d !important;
-    }
-
-    .stButton > button[kind="primary"] {
-        background-color: #1e293b !important;
-        border-color: #3b82f6 !important;
-        color: #60a5fa !important;
-    }
-
-    .metrics-bar {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.70rem !important;
-        color: #71717a !important;
-        background: #090a0c !important;
-        border: 1px solid #1c1e22 !important;
-        padding: 3px 8px !important;
-        border-radius: 2px !important;
-        margin-top: -4px !important;
-        margin-bottom: 12px !important;
-        display: inline-flex !important;
-        gap: 12px !important;
-        max-width: 88% !important;
-    }
-    .metrics-bar b {
-        color: #a1a1aa !important;
-    }
-
-    div[data-baseweb="select"] > div {
-        background-color: #111317 !important;
-        border-color: #27272a !important;
-        border-radius: 2px !important;
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.80rem !important;
-        color: #e2e8f0 !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# Keep the visual system in one stylesheet, rather than layered overrides.
+CSS_FILE = Path(__file__).with_name("ui.css")
+st.markdown(f"<style>{CSS_FILE.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
 
 @st.cache_resource
 def get_backend_base_url() -> str:
-    """Discovers the dynamically bound host port for documind_backend."""
-    for test_port in [8888, 8899, 8000]:
-        try:
-            r = httpx.get(f"http://127.0.0.1:{test_port}/healthz", timeout=0.3)
-            if r.status_code == 200:
-                return f"http://127.0.0.1:{test_port}"
-        except Exception:
-            pass
-
-    try:
-        cmd = ["docker", "port", "documind_backend", "8888"]
-        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
-        match = re.search(r":(\d+)$", output)
-        if match:
-            dyn_port = match.group(1)
-            return f"http://127.0.0.1:{dyn_port}"
-    except Exception:
-        pass
-
-    return "http://127.0.0.1:8888"
+    """Return the configured local API address."""
+    return os.getenv("DOCUMIND_BACKEND_URL", "http://127.0.0.1:8888").rstrip("/")
 
 
 BACKEND_BASE_URL = get_backend_base_url()
+HEALTH_URL = f"{BACKEND_BASE_URL}/healthz"
 MODELS_URL = f"{BACKEND_BASE_URL}/summarizer/models"
 REGISTRATION_URL = f"{BACKEND_BASE_URL}/summarizer/upload"
 STREAM_URL = f"{BACKEND_BASE_URL}/summarizer/upload/stream"
 CHAT_URL = f"{BACKEND_BASE_URL}/summarizer/chat"
-OLLAMA_CHAT_URL = "http://127.0.0.1:11434/api/chat"
-
-HISTORY_FILE = "documind_sessions.json"
+HISTORY_FILE = os.getenv(
+    "DOCUMIND_HISTORY_FILE",
+    str(Path(__file__).resolve().parents[1] / "documind_sessions.json"),
+)
 SOCKET_TIMEOUT = httpx.Timeout(connect=20.0, read=None, write=300.0, pool=60.0)
+
+
+@st.cache_data(ttl=15)
+def fetch_backend_health():
+    try:
+        response = httpx.get(HEALTH_URL, timeout=2.0)
+        if response.status_code == 200:
+            return response.json()
+    except httpx.HTTPError:
+        pass
+    return {"status": "offline", "qdrant": "unknown", "ollama": "unknown"}
 
 
 @st.cache_data(ttl=20)
@@ -317,20 +71,16 @@ def fetch_model_directory():
 
 
 def render_metrics_badge(metrics: dict):
-    if not metrics:
+    if not metrics or not st.session_state.get("show_response_details", False):
         return
     ttft = metrics.get("ttft_ms", 0)
     ret_ms = metrics.get("retrieval_ms", 0)
-    sim = metrics.get("top_score", 0.0)
-    speed = metrics.get("tok_per_sec", 0.0)
 
     st.markdown(
         f"""
         <div class="metrics-bar">
-            <span><b>TTFT:</b> {ttft}ms</span>
-            <span><b>RET:</b> {ret_ms}ms</span>
-            <span><b>SIM:</b> {sim}</span>
-            <span><b>SPEED:</b> {speed} tok/s</span>
+            <span><b>First response:</b> {ttft} ms</span>
+            <span><b>Document search:</b> {ret_ms} ms</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -343,9 +93,9 @@ def render_pdf_badges(filenames: list):
         return
     badge_items = "".join(
         [
-            f'<div class="pdf-badge" title="{str(name).replace('"', "&quot;")}">'
+            f'<div class="pdf-badge" title="{html.escape(str(name), quote=True)}">'
             f'<span class="pdf-icon">PDF</span>'
-            f'<span class="pdf-name">{name}</span>'
+            f'<span class="pdf-name">{html.escape(str(name))}</span>'
             f'</div>'
             for name in filenames
         ]
@@ -354,27 +104,13 @@ def render_pdf_badges(filenames: list):
 
 
 def generate_semantic_title(sample_text: str, model: str = "llama3.2:3b") -> str:
-    prompt = (
-        "Generate a short, concise workspace title (maximum 3 to 5 words) that captures the core subject of this text. "
-        "Do NOT use quotes, emojis, punctuation, or conversational filler. Return ONLY the title words.\n\n"
-        f"Text excerpt:\n{sample_text[:1200]}"
-    )
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0.2, "num_ctx": 4096},
-        "stream": False,
-    }
-    try:
-        with httpx.Client(timeout=15.0) as client:
-            resp = client.post(OLLAMA_CHAT_URL, json=payload)
-            if resp.status_code == 200:
-                title = resp.json().get("message", {}).get("content", "").strip()
-                cleaned = title.replace('"', "").replace("'", "").strip()
-                return cleaned if cleaned else "WORKSPACE"
-    except Exception:
-        pass
-    return "WORKSPACE"
+    """Create a workspace label locally without an extra model round trip."""
+    del model
+    text = " ".join(sample_text.strip().split())
+    if not text:
+        return "New workspace"
+    sentence = text.split(". ", 1)[0]
+    return sentence[:38].rstrip(" ,:;.-") + ("…" if len(sentence) > 38 else "")
 
 
 def load_sessions():
@@ -394,13 +130,13 @@ def save_sessions(sessions):
             json.dump(sessions, f, ensure_ascii=False, indent=2)
         os.replace(tmp_file, HISTORY_FILE)
     except Exception as e:
-        st.error(f"[SYS_ERR] Failed to persist session data: {e}")
+        st.error(f"Could not save workspace history: {e}")
 
 
 def create_new_workspace():
     new_id = str(uuid.uuid4())
     new_session = {
-        "title": "INIT_WORKSPACE",
+        "title": "New workspace",
         "documents": [],
         "messages": [],
         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -424,18 +160,46 @@ def delete_workspace(session_id: str):
         st.rerun()
 
 
-@st.dialog("CONFIRM_ACTION")
+@st.dialog("Delete workspace?")
 def confirm_delete_dialog(session_id: str):
     target_title = st.session_state.sessions.get(session_id, {}).get("title", "WORKSPACE")
-    st.write(f"DELETE TARGET WORKSPACE: `{target_title}`?")
+    st.write(f"Delete **{target_title}** and its chat history?")
 
     col_yes, col_no = st.columns(2)
     with col_yes:
-        if st.button("[CONFIRM]", type="primary", use_container_width=True):
+        if st.button("Delete", type="primary", use_container_width=True):
             delete_workspace(session_id)
     with col_no:
-        if st.button("[ABORT]", use_container_width=True):
+        if st.button("Cancel", use_container_width=True):
             st.rerun()
+
+
+def response_text_chunks(response, telemetry):
+    """Decode incremental UTF-8 and handle a metadata header split across packets."""
+    response.raise_for_status()
+    pending = ""
+    header_done = False
+    for text in response.iter_text():
+        if not header_done:
+            pending += text
+            if "__META__".startswith(pending):
+                continue
+            if pending.startswith("__META__"):
+                if "\n" not in pending:
+                    continue
+                header, _, text = pending.partition("\n")
+                try:
+                    telemetry.update(json.loads(header[len("__META__"):]))
+                except (ValueError, TypeError):
+                    pass
+            else:
+                text = pending
+            pending = ""
+            header_done = True
+        if text:
+            yield text
+    if pending and not pending.startswith("__META__"):
+        yield pending
 
 
 def stream_with_metrics(client, url, payload, placeholder):
@@ -444,31 +208,19 @@ def stream_with_metrics(client, url, payload, placeholder):
     telemetry = {}
     ai_text = ""
     token_count = 0
+    last_render = 0.0
 
     with client.stream("POST", url, json=payload) as response:
-        for chunk in response.iter_bytes():
-            if not chunk:
-                continue
-            raw_text = chunk.decode("utf-8", errors="ignore")
-
-            if raw_text.startswith("__META__"):
-                meta_line, _, remainder = raw_text.partition("\n")
-                meta_json = meta_line.replace("__META__", "").strip()
-                try:
-                    telemetry = json.loads(meta_json)
-                except Exception:
-                    pass
-                raw_text = remainder
-
-            if not raw_text:
-                continue
-
+        for raw_text in response_text_chunks(response, telemetry):
             if ttft is None:
                 ttft = (time.perf_counter() - t_start) * 1000.0
 
             token_count += 1
             ai_text += raw_text
-            placeholder.markdown(ai_text + "█")
+            now = time.perf_counter()
+            if now - last_render >= 0.04:
+                placeholder.markdown(ai_text + " ▍")
+                last_render = now
 
     placeholder.markdown(ai_text)
     t_end = time.perf_counter()
@@ -514,96 +266,144 @@ if "documents" not in current_session:
         })
 
 model_dir = fetch_model_directory()
-installed_models = model_dir.get("installed", ["llama3.2:3b"])
+installed_models = model_dir.get("installed", [])
+if not installed_models:
+    installed_models = ["llama3.2:3b"]
 recommended_models = model_dir.get("recommended", [])
+backend_health = fetch_backend_health()
 
-# Sidebar
+# A quiet navigation rail keeps history and documents close to the conversation.
 with st.sidebar:
-    st.markdown("### `DOCUMIND`")
-    st.caption("v1.2.0 // MULTI-DOC RAG ENGINE")
-
-    if st.button("[+] NEW_WORKSPACE", use_container_width=True, type="primary"):
+    st.markdown(
+        '<div class="sidebar-brand"><span class="brand-symbol">✦</span>'
+        '<div><div class="brand-name">DocuMind</div>'
+        '<div class="brand-caption">A little clarity, every day</div></div></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("New workspace", icon=":material/add:", use_container_width=True, type="primary"):
         create_new_workspace()
         st.session_state.editing_idx = None
         st.rerun()
 
-    st.divider()
-
-    st.caption("ACTIVE_MODEL_ENGINE")
-    selected_model = st.selectbox(
-        "Active Model:",
-        options=installed_models,
-        index=0,
-        label_visibility="collapsed",
-        help="Select any local model installed in your Ollama runtime.",
+    workspace_search = st.text_input(
+        "Search conversations", placeholder="Search conversations…", label_visibility="collapsed",
+        key="workspace_search",
     )
-
-    with st.expander("GET MORE MODELS"):
-        for rec in recommended_models:
-            is_installed = any(rec["name"] in inst for inst in installed_models)
-            badge = "<span style='color:#4ade80;'>[READY]</span>" if is_installed else "<span style='color:#f87171;'>[NOT PULLED]</span>"
-            st.markdown(
-                f"""
-                <div class="model-card">
-                    <b>{rec['name']}</b> {badge}
-                    <div class="desc">{rec['desc']}</div>
-                    <a href="{rec['url']}" target="_blank">View Model Docs ↗</a>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-            if not is_installed:
-                st.code(f"ollama run {rec['name']}", language="bash")
-
-    st.divider()
-
-    st.caption("MOUNTED_DOCUMENTS (MAX 3)")
-    if current_session["documents"]:
-        for doc in current_session["documents"]:
-            raw_fname = doc["filename"]
-            display_fname = (raw_fname[:18] + "...") if len(raw_fname) > 21 else raw_fname
-            st.markdown(
-                f'<div class="pdf-badge" style="max-width:100%; width:100%; margin-bottom:4px;" title="{raw_fname}">'
-                f'<span class="pdf-icon">PDF</span><span class="pdf-name">{display_fname}</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("[STANDBY] NO_DOCUMENTS_ATTACHED (CHATBOT MODE)")
-
-    st.divider()
-    st.caption("SESSION_INDEX")
-
-    for s_id, s_data in list(st.session_state.sessions.items()):
-        full_title = s_data.get("title", "UNTITLED")
-        is_active = s_id == st.session_state.active_session_id
-        btn_type = "secondary" if not is_active else "primary"
-        truncated_title = (full_title[:18] + "...") if len(full_title) > 21 else full_title
-
-        col_select, col_del = st.columns([0.86, 0.14])
-        with col_select:
-            prefix = "> " if is_active else "  "
-            if st.button(
-                f"{prefix}{truncated_title}",
-                key=f"btn_{s_id}",
-                use_container_width=True,
-                type=btn_type,
-                help=full_title,
-            ):
-                if not is_active:
+    st.markdown('<div class="sidebar-section-label">Recent conversations</div>', unsafe_allow_html=True)
+    with st.container(key="workspace-list"):
+        matches = [
+            (s_id, s_data) for s_id, s_data in st.session_state.sessions.items()
+            if workspace_search.lower() in s_data.get("title", "New workspace").lower()
+        ]
+        visible_count = st.session_state.get("visible_conversations", 8)
+        for s_id, s_data in matches[:visible_count]:
+            full_title = s_data.get("title") or "New workspace"
+            is_active = s_id == st.session_state.active_session_id
+            with st.container(key=f"{'active-workspace' if is_active else 'workspace'}-{s_id}"):
+                if st.button(
+                    full_title[:31] + ("…" if len(full_title) > 31 else ""),
+                    key=f"btn_{s_id}", icon=":material/chat_bubble_outline:",
+                    use_container_width=True, help=full_title,
+                ) and not is_active:
                     st.session_state.active_session_id = s_id
                     st.session_state.editing_idx = None
                     st.rerun()
-        with col_del:
-            if st.button(
-                "×",
-                key=f"del_{s_id}",
-                use_container_width=True,
-                help=f"Delete '{full_title}'",
-            ):
-                confirm_delete_dialog(s_id)
+        if not matches:
+            st.caption("No conversations found.")
+        elif len(matches) > visible_count:
+            if st.button("Show more", use_container_width=True):
+                st.session_state.visible_conversations = visible_count + 8
+                st.rerun()
 
-st.markdown(f"## `DOCUMIND // {current_session['title']}`")
+    st.divider()
+    with st.expander(f"Documents · {len(current_session['documents'])}/3", expanded=bool(current_session['documents'])):
+        if current_session["documents"]:
+            render_pdf_badges([doc["filename"] for doc in current_session["documents"]])
+        else:
+            st.caption("Use the + button in the message box to attach a PDF. Send it without a question to get a summary.")
+
+    with st.container(key="sidebar-tools"):
+        healthy = backend_health.get("status") == "healthy"
+        st.markdown(
+            f'<div class="connection-row"><span class="connection-dot {"good" if healthy else "warn"}"></span>'
+            f'{"Local services ready" if healthy else "Check your connection"}</div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("Connection & details"):
+            st.caption(f"Backend: {backend_health.get('status', 'unknown')}")
+            st.caption(f"Document search: {backend_health.get('qdrant', 'unknown')}")
+            st.caption(f"Ollama: {backend_health.get('ollama', 'unknown')}")
+            st.toggle("Show response details", key="show_response_details")
+            if st.button("Refresh connection", icon=":material/refresh:", use_container_width=True):
+                fetch_backend_health.clear()
+                fetch_model_directory.clear()
+                st.rerun()
+
+# Model settings are available from the top of the workspace without filling the sidebar.
+def render_model_controls():
+    model_source = st.selectbox(
+        "Model source", ["Local · Ollama", "API key · OpenAI-compatible"], key="model_source",
+    )
+    if model_source.startswith("Local"):
+        default_model = os.getenv("OLLAMA_CHAT_MODEL", "llama3.2:3b")
+        if st.session_state.get("local_chat_model") not in installed_models:
+            st.session_state.local_chat_model = default_model if default_model in installed_models else installed_models[0]
+        selected_model = st.selectbox("Chat model", installed_models, key="local_chat_model")
+        provider_settings = {"provider": "ollama"}
+        st.caption("Your prompts and documents stay on this computer.")
+        with st.expander("Add another local model"):
+            st.caption("Download a model with Ollama, then refresh the connection in the sidebar.")
+            st.code("ollama pull llama3.2:3b", language="bash")
+    else:
+        st.session_state.setdefault("api_base_url", "https://api.openai.com/v1")
+        st.session_state.setdefault("api_model", "gpt-4o-mini")
+        api_base_url = st.text_input("API base URL", key="api_base_url", placeholder="https://api.openai.com/v1")
+        selected_model = st.text_input("Model ID", key="api_model", placeholder="Your provider's model ID")
+        api_key = st.text_input("API key", type="password", key="provider_api_key", placeholder="Paste your API key")
+        provider_settings = {"provider": "openai-compatible", "api_base_url": api_base_url.strip(), "api_key": api_key}
+        st.caption("Your key is kept only in this session. Messages and relevant document text are sent to your chosen provider.")
+    return model_source, selected_model, provider_settings
+
+with st.container(key="chat-toolbar"):
+    model_column, options_column = st.columns([0.78, 0.22])
+    with model_column:
+        preferred_local_model = st.session_state.get("local_chat_model") or os.getenv("OLLAMA_CHAT_MODEL", "llama3.2:3b")
+        local_model_label = preferred_local_model if preferred_local_model in installed_models else installed_models[0]
+        model_label = (
+            st.session_state.get("api_model") or "Connect a model"
+            if st.session_state.get("model_source", "Local").startswith("API key")
+            else local_model_label
+        )
+        with st.popover(model_label, icon=":material/auto_awesome:", help="Choose a model or connect an API", key="model-picker"):
+            st.markdown("**Choose your model**")
+            model_source, selected_model, provider_settings = render_model_controls()
+    with options_column:
+        with st.popover("Workspace", icon=":material/more_horiz:", use_container_width=True):
+            workspace_title = st.text_input("Workspace name", value=current_session.get("title", "New workspace"), key=f"rename-{st.session_state.active_session_id}")
+            if st.button("Save name", use_container_width=True):
+                current_session["title"] = workspace_title.strip() or "New workspace"
+                save_sessions(st.session_state.sessions)
+                st.rerun()
+            transcript = "\n\n".join(f"{m['role'].title()}\n{m['content']}" for m in current_session["messages"])
+            st.download_button("Download conversation", transcript, file_name="documind-conversation.txt", use_container_width=True)
+            if st.button("Delete workspace", icon=":material/delete_outline:", use_container_width=True):
+                confirm_delete_dialog(st.session_state.active_session_id)
+
+is_empty_workspace = not current_session["messages"]
+if is_empty_workspace:
+    st.markdown(
+        '<div class="workspace-hero"><div class="hero-symbol" aria-hidden="true"></div>'
+        '<div class="hero-kicker">YOUR SPACE TO THINK</div>'
+        '<h1>What would you like<br>to <span class="hero-accent">understand?</span></h1>'
+        '<p class="hero-copy">Bring a document. Ask a question.<br>Find the details that matter.</p></div>',
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(f"## {html.escape(current_session.get('title') or 'Your conversation')}")
+    st.markdown(
+        f'<div class="workspace-meta">{len(current_session["documents"])} document(s) · {html.escape(selected_model)}</div>',
+        unsafe_allow_html=True,
+    )
 
 # Render Timeline
 idx = 0
@@ -613,14 +413,14 @@ while idx < len(current_session["messages"]):
 
     if is_user and st.session_state.editing_idx == idx:
         with st.container():
-            st.markdown(f"**`>_ EDIT PROMPT #{idx + 1}`**")
+            st.markdown(f"**Edit question {idx + 1}**")
             with st.form(key=f"edit_form_{idx}"):
-                edited_text = st.text_area("PROMPT_BUFFER:", value=msg["content"], height=90)
-                col_save, col_cancel = st.columns([0.3, 0.7])
+                edited_text = st.text_area("Your message", value=msg["content"], height=90)
+                col_save, col_cancel = st.columns([0.5, 0.5])
                 with col_save:
-                    save_clicked = st.form_submit_button("[REGENERATE]", type="primary", use_container_width=True)
+                    save_clicked = st.form_submit_button("Save and regenerate", type="primary", use_container_width=True)
                 with col_cancel:
-                    cancel_clicked = st.form_submit_button("[CANCEL]", use_container_width=True)
+                    cancel_clicked = st.form_submit_button("Cancel", use_container_width=True)
 
                 if save_clicked and edited_text.strip():
                     clean_text = edited_text.strip()
@@ -648,6 +448,7 @@ while idx < len(current_session["messages"]):
                             "question": clean_text,
                             "history": history_payload,
                             "model": selected_model,
+                            **provider_settings,
                         }
                         try:
                             with httpx.Client(timeout=SOCKET_TIMEOUT) as client:
@@ -660,7 +461,7 @@ while idx < len(current_session["messages"]):
                             })
                             save_sessions(st.session_state.sessions)
                         except Exception as e:
-                            st.error(f"[EXEC_ERR] Query failed: {str(e)}")
+                            st.error(f"Could not get a response: {str(e)}")
 
                     st.rerun()
 
@@ -678,25 +479,49 @@ while idx < len(current_session["messages"]):
             render_metrics_badge(msg["metrics"])
 
         if is_user:
-            col_spacer, col_copy, col_edit = st.columns([0.76, 0.12, 0.12])
-            with col_copy:
-                if st.button("[COPY]", key=f"cp_{idx}", help="Copy prompt"):
-                    st.toast("Prompt buffered.")
-            with col_edit:
-                if st.button("[EDIT]", key=f"ed_{idx}", help="Edit prompt and re-branch"):
+            with st.container(horizontal=True, horizontal_alignment="right", key=f"message-actions-{idx}"):
+                with st.popover("Copy", icon=":material/content_copy:", help="Copy this question"):
+                    st.code(msg["content"], language=None)
+                if st.button("Edit", key=f"ed_{idx}", icon=":material/edit:", type="tertiary", help="Edit this question and regenerate"):
                     st.session_state.editing_idx = idx
                     st.rerun()
 
     idx += 1
 
-# Chat Input
-prompt_input = st.chat_input(
-    "Write your prompt here...",
-    accept_file="multiple",
-    file_type=["pdf"],
-)
+# The first composer sits beneath the welcome; active chats keep it at the bottom.
+def render_composer():
+    return st.chat_input(
+        "Ask a question, or attach a PDF…", key="chat_composer", accept_file="multiple",
+        file_type=["pdf"], max_upload_size=50, height=120 if is_empty_workspace else "content",
+    )
+
+
+def draft_prompt(text):
+    st.session_state.chat_composer = text
+
+
+if is_empty_workspace:
+    with st.container(key="welcome-composer"):
+        prompt_input = render_composer()
+        st.markdown('<div class="composer-note">Attach up to 3 PDFs · 50 MB per file · Enter to send</div>', unsafe_allow_html=True)
+    with st.container(key="quick-starts"):
+        starter_columns = st.columns(3)
+        for column, label, icon, text in zip(
+            starter_columns,
+            ["Summarize a document", "Find key takeaways", "Compare documents"],
+            [":material/description:", ":material/lightbulb:", ":material/compare_arrows:"],
+            ["Summarize the attached document clearly and concisely.", "What are the key takeaways from the attached document?", "Compare the attached documents and explain the main differences."],
+        ):
+            with column:
+                st.button(label, icon=icon, use_container_width=True, on_click=draft_prompt, args=(text,))
+else:
+    prompt_input = render_composer()
 
 if prompt_input:
+    if model_source.startswith("API key") and (not selected_model.strip() or not provider_settings.get("api_key")):
+        st.error("Open the model picker above and enter your model ID and API key.")
+        st.stop()
+
     user_text = (
         prompt_input.text
         if hasattr(prompt_input, "text") and prompt_input.text
@@ -709,20 +534,44 @@ if prompt_input:
     )
 
     if attached_files:
-        existing_hashes = {d.get("file_hash") for d in current_session.get("documents", [])}
-        existing_names = {d.get("filename") for d in current_session.get("documents", [])}
+        existing_docs = current_session.get("documents", [])
+        existing_hashes = {d.get("file_hash") for d in existing_docs}
+        existing_names = {d.get("filename") for d in existing_docs}
 
         newly_attached = []
+        unique_upload_count = 0
+        matched_existing = []
         for f in attached_files:
             f_bytes = f.getvalue()
             f_hash = hashlib.sha256(f_bytes).hexdigest()
-            if f_hash not in existing_hashes and f.name not in existing_names:
+            if f_hash in existing_hashes or f.name in existing_names:
+                if f.name in existing_names and f.name not in matched_existing:
+                    matched_existing.append(f.name)
+                continue
+
+            if all(item[0].name != f.name for item in newly_attached):
+                unique_upload_count += 1
                 if len(current_session["documents"]) + len(newly_attached) < 3:
                     newly_attached.append((f, f_bytes, f_hash))
+                    existing_hashes.add(f_hash)
+                    existing_names.add(f.name)
 
-        file_names = [f[0].name for f in newly_attached] if newly_attached else [f.name for f in attached_files[:3]]
+        remaining_slots = max(0, 3 - len(current_session["documents"]))
+        if unique_upload_count > remaining_slots:
+            st.warning(f"This workspace can hold 3 PDFs. Only the first {remaining_slots} new file(s) were added.")
 
-        display_prompt = user_text if user_text else f"Analyze and summarize the contents of: {', '.join(file_names)}"
+        file_names = (
+            [f[0].name for f in newly_attached]
+            if newly_attached
+            else matched_existing[:3]
+        )
+
+        default_prompt = (
+            f"Analyze and summarize the contents of: {', '.join(file_names)}"
+            if file_names
+            else "Analyze and summarize the documents already attached to this workspace."
+        )
+        display_prompt = user_text or default_prompt
         current_session["messages"].append({
             "role": "user",
             "content": display_prompt,
@@ -746,7 +595,7 @@ if prompt_input:
             status_box.markdown(
                 """
                 <div class="pipeline-status">
-                    <span>⚡</span> <span><b>[01/03]</b> INGESTING & PARSING PDF DOCUMENT AST...</span>
+                    <span>✦</span> <span>Reading your PDFs…</span>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -765,14 +614,14 @@ if prompt_input:
                             })
                         save_sessions(st.session_state.sessions)
                     else:
-                        st.error(f"[ERR] Backend rejected upload: {upload_res.text}")
+                        st.error(f"Could not upload your PDF: {upload_res.text}")
             except Exception as e:
-                st.error(f"[ERR] Document registration failed: {str(e)}")
+                st.error(f"Could not upload your PDF: {str(e)}")
 
             status_box.markdown(
                 f"""
                 <div class="pipeline-status">
-                    <span>🧠</span> <span><b>[02/03]</b> COMPUTING HYBRID BM25 + DENSE EMBEDDINGS & SYNTHESIZING ({selected_model})...</span>
+                    <span>✦</span> <span>Preparing your answer…</span>
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -782,6 +631,7 @@ if prompt_input:
                 ai_response = ""
                 placeholder = st.empty()
                 form_data = {"model": selected_model}
+                form_data.update(provider_settings)
                 if user_text:
                     form_data["custom_prompt"] = user_text
 
@@ -789,19 +639,21 @@ if prompt_input:
                     t0 = time.perf_counter()
                     ttft = None
                     tokens = 0
+                    last_render = 0.0
                     with httpx.Client(timeout=SOCKET_TIMEOUT) as client:
                         with client.stream(
                             "POST", STREAM_URL, files=files_payload, data=form_data
                         ) as response:
                             status_box.empty()
-                            for chunk in response.iter_bytes():
-                                if chunk:
-                                    if ttft is None:
-                                        ttft = (time.perf_counter() - t0) * 1000.0
-                                    tokens += 1
-                                    token = chunk.decode("utf-8", errors="ignore")
-                                    ai_response += token
-                                    placeholder.markdown(ai_response + "█")
+                            for token in response_text_chunks(response, {}):
+                                if ttft is None:
+                                    ttft = (time.perf_counter() - t0) * 1000.0
+                                tokens += 1
+                                ai_response += token
+                                now = time.perf_counter()
+                                if now - last_render >= 0.04:
+                                    placeholder.markdown(ai_response + " ▍")
+                                    last_render = now
 
                     placeholder.markdown(ai_response)
                     t1 = time.perf_counter()
@@ -830,7 +682,7 @@ if prompt_input:
 
                 except Exception as e:
                     status_box.empty()
-                    st.error(f"[EXEC_ERR] Synthesis failed: {str(e)}")
+                    st.error(f"Could not prepare an answer: {str(e)}")
 
         else:
             # Files already present in workspace -> Multi-Doc Q&A
@@ -848,6 +700,7 @@ if prompt_input:
                     "question": display_prompt,
                     "history": history_payload,
                     "model": selected_model,
+                    **provider_settings,
                 }
                 try:
                     with httpx.Client(timeout=SOCKET_TIMEOUT) as client:
@@ -859,8 +712,9 @@ if prompt_input:
                         "metrics": metrics,
                     })
                     save_sessions(st.session_state.sessions)
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"[EXEC_ERR] Query failed: {str(e)}")
+                    st.error(f"Could not get a response: {str(e)}")
 
     else:
         # General Chatbot Mode
@@ -885,6 +739,7 @@ if prompt_input:
                 "question": user_text,
                 "history": history_payload,
                 "model": selected_model,
+                **provider_settings,
             }
 
             try:
@@ -897,5 +752,6 @@ if prompt_input:
                     "metrics": metrics,
                 })
                 save_sessions(st.session_state.sessions)
+                st.rerun()
             except Exception as e:
-                st.error(f"[EXEC_ERR] Query failed: {str(e)}")
+                st.error(f"Could not get a response: {str(e)}")

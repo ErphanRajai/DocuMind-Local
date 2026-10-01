@@ -1,24 +1,51 @@
 @echo off
+setlocal
+cd /d "%~dp0"
+
 echo ==========================================
-echo   Starting DocuMind Local AI Engine...
+echo        DocuMind Local AI Workspace
 echo ==========================================
-
-REM ۱. روشن کردن تمام کانتینرها
-docker compose up -d
-
 echo.
-echo ⏳ Waiting 8 seconds for AI Engine and Database to initialize...
-timeout /t 8 /nobreak >nul
 
-echo.
-echo Starting Streamlit Client UI in background...
-start /b python -m streamlit run pdf-summarizer-frontend/app.py --server.headless=true
+where py >nul 2>nul
+if %errorlevel% equ 0 (
+    set "PYTHON=py -3"
+) else (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo Python 3 was not found. Install Python 3.10 or newer and try again.
+        echo Download: https://www.python.org/downloads/
+        pause
+        exit /b 1
+    )
+    set "PYTHON=python"
+)
 
-echo.
-echo Launching Desktop Interface...
-python launcher.py
+if not exist ".venv\Scripts\python.exe" (
+    echo Setting up the Python environment for the first launch...
+    %PYTHON% -m venv .venv
+    if errorlevel 1 goto setup_failed
+)
 
+if not exist ".venv\frontend-ready" (
+    echo Installing the DocuMind interface. This may take a minute...
+    .venv\Scripts\python.exe -m pip install --upgrade pip
+    if errorlevel 1 goto setup_failed
+    .venv\Scripts\python.exe -m pip install -r pdf-summarizer-frontend\requirements.txt
+    if errorlevel 1 goto setup_failed
+    type nul > ".venv\frontend-ready"
+)
+
+.venv\Scripts\python.exe launcher.py
+if errorlevel 1 (
+    echo.
+    echo DocuMind could not start. See the message above for the next step.
+    pause
+)
+exit /b %errorlevel%
+
+:setup_failed
 echo.
-echo Shutting down AI Engine background containers...
-docker compose down
-exit
+echo Setup failed. Check your internet connection and try again.
+pause
+exit /b 1

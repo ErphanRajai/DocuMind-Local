@@ -11,9 +11,16 @@ env/
 
 .vscode/
 .idea/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.log
 
 *.db
 *.sqlite3
+*.sqlite3-*
+*.db-*
 db_data/
 uploaded_pdfs/
 
@@ -21,5 +28,7 @@ uploaded_pdfs/
 Thumbs.db
 ollama_storage/
 qdrant_storage/
-documind_sessions.json 
-pdf-summarizer-frontend/documind_sessions.jsonclaudes plan for documind.txt
+documind_sessions.json
+pdf-summarizer-frontend/documind_sessions.json
+claudes plan for documind.txt
+docs/.capture/

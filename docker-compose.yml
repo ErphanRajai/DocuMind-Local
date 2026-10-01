@@ -3,8 +3,8 @@ services:
     image: qdrant/qdrant:latest
     container_name: documind_qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - ./qdrant_storage:/qdrant/storage
     restart: unless-stopped
@@ -15,14 +15,18 @@ services:
       dockerfile: Dockerfile
     container_name: documind_backend
     ports:
-      - "8888"
+      - "127.0.0.1:8888:8888"
     environment:
-      - OLLAMA_API_URL=http://host.docker.internal:11434/api/chat
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_API_URL=http://host.docker.internal:${DOCUMIND_OLLAMA_PORT:-11434}/api/chat
+      - OLLAMA_BASE_URL=http://host.docker.internal:${DOCUMIND_OLLAMA_PORT:-11434}
+      - OLLAMA_EMBED_URL=http://host.docker.internal:${DOCUMIND_OLLAMA_PORT:-11434}/api/embeddings
+      - OLLAMA_TAGS_URL=http://host.docker.internal:${DOCUMIND_OLLAMA_PORT:-11434}/api/tags
       - OLLAMA_CHAT_MODEL=llama3.2:3b
       - OLLAMA_EMBED_MODEL=nomic-embed-text
+      - CHAT_MODEL=llama3.2:3b
+      - EMBED_MODEL=nomic-embed-text
       - EMBED_VECTOR_DIM=768
-      - QDRANT_HOST=qdrant_service
+      - QDRANT_HOST=http://qdrant_service:6333
       - QDRANT_PORT=6333
       - MAX_UPLOAD_MB=50
       - DB_URL=sqlite:////workspace/db_data/pdf_summarizer.db

@@ -161,7 +161,10 @@ async def upload_pdfs(
 async def upload_and_stream_multi_summary(
     files: List[UploadFile] = File(...),
     custom_prompt: Optional[str] = Form(None),
-    model: Optional[str] = Form(None)
+    model: Optional[str] = Form(None),
+    provider: str = Form("ollama"),
+    api_base_url: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
 ):
     all_chunks = []
     for file in files[:3]:
@@ -184,7 +187,14 @@ async def upload_and_stream_multi_summary(
         raise HTTPException(status_code=400, detail="No readable text extracted from uploaded PDFs.")
 
     return StreamingResponse(
-        LLMService.stream_summarize_chunks(all_chunks, custom_prompt=custom_prompt, model=model),
+        LLMService.stream_summarize_chunks(
+            all_chunks,
+            custom_prompt=custom_prompt,
+            model=model,
+            provider=provider,
+            api_base_url=api_base_url,
+            api_key=api_key,
+        ),
         media_type="text/event-stream"
     )
 
@@ -200,6 +210,9 @@ class ChatRequest(BaseModel):
     question: str
     history: Optional[List[ChatMessage]] = []
     model: Optional[str] = None
+    provider: str = "ollama"
+    api_base_url: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 @router.post("/chat")
@@ -272,21 +285,34 @@ async def chat_with_pdf_or_general(payload: ChatRequest, db: Session = Depends(g
         }
         yield f"__META__{json.dumps(telemetry_init)}\n"
 
-        client_timeout = httpx.Timeout(connect=20.0, read=None, write=300.0, pool=60.0)
-        async with httpx.AsyncClient(timeout=client_timeout) as client:
-            try:
-                async with client.stream("POST", LLMService.API_URL, json=chat_payload) as response:
-                    if response.status_code == 200:
-                        async for line in response.aiter_lines():
-                            if line:
-                                data = json.loads(line)
-                                token = data.get("message", {}).get("content", "")
-                                yield token
-                    elif response.status_code == 404:
-                        yield f"[Backend Error: Model '{selected_model}' is not pulled in Ollama. Run 'ollama run {selected_model}' in terminal to install it.]"
-                    else:
-                        yield f"[Backend Error: Status {response.status_code}]"
-            except Exception as e:
-                yield f"[Chat Connection Error: {str(e)}]"
+        if payload.provider == "openai-compatible":
+            if not payload.api_key or not payload.api_base_url:
+                yield "[Add an API endpoint and API key in Model settings to use this provider.]"
+                return
+            async for token in LLMService.stream_openai_compatible(
+                messages_payload,
+                model=selected_model,
+                base_url=payload.api_base_url,
+                api_key=payload.api_key,
+            ):
+                yield token
+            return
+
+        try:
+            client = await LLMService._client()
+            async with client.stream("POST", LLMService.API_URL, json=chat_payload) as response:
+                if response.status_code == 200:
+                    async for line in response.aiter_lines():
+                        if line:
+                            data = json.loads(line)
+                            token = data.get("message", {}).get("content", "")
+                            yield token
+                elif response.status_code == 404:
+                    yield f"[Backend Error: Model '{selected_model}' is not pulled in Ollama. Run 'ollama pull {selected_model}' in terminal to install it.]"
+                else:
+                    yield f"[Backend Error: Ollama returned HTTP {response.status_code}]"
+        except Exception as e:
+            logger.exception("Local Ollama chat request failed")
+            yield f"[Chat connection error: {type(e).__name__}. Check that Ollama is running.]"
 
     return StreamingResponse(chat_stream_generator(), media_type="text/event-stream")

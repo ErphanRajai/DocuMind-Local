@@ -1,11 +1,11 @@
+import io
 import logging
-import os
 import re
 from typing import List
 
 import fitz  # PyMuPDF
-from pdf2image import convert_from_path
 import pytesseract
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -14,42 +14,38 @@ class PDFProcessorService:
     @staticmethod
     def extract_text(file_path: str) -> str:
         """
-        Robust text extraction pipeline:
-        1. Direct PyMuPDF text & block extraction.
-        2. Automatic OCR fallback with pdf2image + pytesseract if text density is low.
+        Extract selectable text page by page and OCR image pages with little text.
+        Rendering only sparse pages avoids holding a full scanned PDF in memory
+        and handles mixed text/scanned documents.
         """
         raw_text_parts = []
 
         try:
             doc = fitz.open(file_path)
             for page in doc:
-                text = page.get_text("text")
-                if text and text.strip():
-                    raw_text_parts.append(text.strip())
-                else:
-                    # Fallback to block-level extraction for complex layouts
+                page_text = page.get_text("text").strip()
+                if len(page_text) < 80 and page.get_images(full=True):
+                    try:
+                        pixmap = page.get_pixmap(dpi=200, alpha=False)
+                        with Image.open(io.BytesIO(pixmap.tobytes("png"))) as image:
+                            ocr_text = pytesseract.image_to_string(image).strip()
+                        if len(ocr_text) > len(page_text):
+                            page_text = ocr_text
+                    except Exception as ocr_err:
+                        logger.warning("OCR failed on a page in %s: %s", file_path, ocr_err)
+
+                if not page_text:
+                    # Fallback for complex layouts not represented in text mode.
                     blocks = page.get_text("blocks")
-                    block_text = "\n".join([b[4] for b in blocks if len(b) > 4 and isinstance(b[4], str)])
-                    if block_text.strip():
-                        raw_text_parts.append(block_text.strip())
+                    page_text = "\n".join(
+                        b[4] for b in blocks if len(b) > 4 and isinstance(b[4], str)
+                    ).strip()
+                if page_text:
+                    raw_text_parts.append(page_text)
         except Exception as e:
             logger.warning(f"PyMuPDF parser warning on {file_path}: {e}")
 
         extracted_content = "\n\n".join(raw_text_parts).strip()
-
-        # If extracted text is empty or sparse (< 80 characters), execute Tesseract OCR
-        if len(extracted_content) < 80:
-            logger.info(f"Low text density ({len(extracted_content)} chars). Running OCR fallback on {file_path}...")
-            try:
-                images = convert_from_path(file_path, dpi=200)
-                ocr_results = []
-                for img in images:
-                    page_ocr = pytesseract.image_to_string(img)
-                    if page_ocr.strip():
-                        ocr_results.append(page_ocr.strip())
-                extracted_content = "\n\n".join(ocr_results).strip()
-            except Exception as ocr_err:
-                logger.error(f"OCR fallback error on {file_path}: {ocr_err}")
 
         # Clean academic/trailing bibliography if present in the latter 60% of text
         ref_patterns = [

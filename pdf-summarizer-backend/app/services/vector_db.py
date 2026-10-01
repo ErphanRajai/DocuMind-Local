@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from typing import List, Tuple, Union
 
 from fastembed import SparseTextEmbedding
@@ -53,8 +54,9 @@ def init_qdrant_collection():
                     )
                 },
             )
-    except Exception as e:
-        logger.error("Failed to initialize hybrid Qdrant collection: %s", str(e))
+    except Exception:
+        logger.exception("Failed to initialize hybrid Qdrant collection")
+        raise
 
 
 init_vector_db = init_qdrant_collection
@@ -64,24 +66,19 @@ async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str =
     if not chunks:
         return
 
-    # 1. Compute BM25 sparse embeddings
-    sparse_embeddings = list(sparse_model.embed(chunks))
-
-    # 2. Concurrently compute Ollama dense embeddings
-    semaphore = asyncio.Semaphore(5)
-
-    async def fetch_emb(chunk: str):
-        async with semaphore:
-            return await LLMService.get_embedding(chunk)
-
-    dense_embeddings = await asyncio.gather(*(fetch_emb(c) for c in chunks))
+    # Keep CPU-bound sparse encoding off the API event loop and batch dense
+    # requests to avoid one HTTP round trip per chunk on current Ollama builds.
+    sparse_embeddings, dense_embeddings = await asyncio.gather(
+        asyncio.to_thread(lambda: list(sparse_model.embed(chunks))),
+        LLMService.get_embeddings(chunks),
+    )
 
     # 3. Assemble dual-vector point structs
     points = []
     for idx, (chunk, dense_vec, sparse_vec) in enumerate(
         zip(chunks, dense_embeddings, sparse_embeddings)
     ):
-        point_id = int(f"{pdf_id}{idx:04d}")
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"documind:{pdf_id}:{idx}"))
         points.append(
             PointStruct(
                 id=point_id,
@@ -106,7 +103,11 @@ async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str =
         batch_size = 50
         for i in range(0, len(points), batch_size):
             batch = points[i : i + batch_size]
-            qdrant_client.upsert(collection_name=COLLECTION_NAME, points=batch)
+            await asyncio.to_thread(
+                qdrant_client.upsert,
+                collection_name=COLLECTION_NAME,
+                points=batch,
+            )
 
 
 async def search_chunks_in_qdrant_with_scores(
@@ -131,7 +132,7 @@ async def search_chunks_in_qdrant_with_scores(
 
     # Generate sparse query embedding
     sparse_emb_generator = sparse_model.embed([query_text])
-    query_sparse = next(sparse_emb_generator)
+    query_sparse = await asyncio.to_thread(lambda: next(sparse_emb_generator))
 
     if len(target_ids) == 1:
         filter_condition = models.Filter(
@@ -143,7 +144,8 @@ async def search_chunks_in_qdrant_with_scores(
         )
 
     # Hybrid Prefetch + Reciprocal Rank Fusion query
-    results = qdrant_client.query_points(
+    results = await asyncio.to_thread(
+        qdrant_client.query_points,
         collection_name=COLLECTION_NAME,
         prefetch=[
             Prefetch(

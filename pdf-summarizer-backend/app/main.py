@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -20,10 +21,24 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize SQL tables
-    Base.metadata.create_all(bind=engine)
-    # Initialize Qdrant collection
-    init_vector_db()
-    yield
+    await asyncio.to_thread(Base.metadata.create_all, bind=engine)
+    # Compose starts the backend and Qdrant together; allow Qdrant time to accept requests.
+    for attempt in range(30):
+        try:
+            await asyncio.to_thread(init_vector_db)
+            break
+        except Exception:
+            if attempt == 29:
+                raise
+            logger.warning("Qdrant is not ready yet; retrying collection setup (%s/30)", attempt + 1)
+            await asyncio.sleep(2)
+
+    # Reuse local Ollama HTTP connections across requests.
+    await LLMService.startup()
+    try:
+        yield
+    finally:
+        await LLMService.shutdown()
 
 
 app = FastAPI(
@@ -34,8 +49,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://127.0.0.1:8501", "http://localhost:8501"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -47,12 +62,9 @@ app.include_router(summarizer.router)
 async def healthz():
     status = {"status": "healthy", "qdrant": "connected", "ollama": "connected"}
 
-    # 1. Check Qdrant (Synchronous Client - DO NOT AWAIT)
+    # Check Qdrant without blocking other API requests.
     try:
-        collections = qdrant_client.get_collections()
-        if not collections:
-            status["qdrant"] = "degraded: no response"
-            status["status"] = "degraded"
+        await asyncio.to_thread(qdrant_client.get_collections)
     except Exception as e:
         status["qdrant"] = f"unreachable: {str(e)}"
         status["status"] = "degraded"
@@ -60,17 +72,11 @@ async def healthz():
     # 2. Check Ollama
     try:
         async with httpx.AsyncClient(timeout=3.0) as http_client:
-            res = await http_client.get("http://host.docker.internal:11434/")
-            if res.status_code != 200:
-                # Fallback check standard localhost if not in docker bridge
-                res = await http_client.get("http://localhost:11434/")
-    except Exception:
-        # Check basic Ollama reachability via LLMService endpoint
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as http_client:
-                res = await http_client.get(LLMService.API_URL.replace("/api/chat", "/"))
-        except Exception as e:
-            status["ollama"] = f"unreachable: {str(e)}"
-            status["status"] = "degraded"
+            res = await http_client.get(LLMService.API_URL.rsplit("/api/", 1)[0])
+        if res.status_code >= 400:
+            raise RuntimeError(f"HTTP {res.status_code}")
+    except Exception as e:
+        status["ollama"] = f"unreachable: {str(e)}"
+        status["status"] = "degraded"
 
     return status

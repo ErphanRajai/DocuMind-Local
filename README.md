@@ -8,9 +8,11 @@ DocuMind runs on your computer: **Next.js + FastAPI + Ollama + Qdrant + SQLite**
 
 ## See it working
 
-[![DocuMind: a real Persian exam, source references and rendered mathematics](docs/media/documind-study-preview.gif)](https://raw.githubusercontent.com/ErphanRajai/DocuMind-Local/main/docs/media/documind-study-preview.mp4)
+[![DocuMind: a real Persian exam, source references and rendered mathematics](https://cdn.jsdelivr.net/gh/ErphanRajai/DocuMind-Local@06c8b631e9bb6e2e1e1c02930b233cac563e2234/docs/media/documind-study-preview.gif)](https://cdn.jsdelivr.net/gh/ErphanRajai/DocuMind-Local@06c8b631e9bb6e2e1e1c02930b233cac563e2234/docs/media/documind-study-preview.mp4)
 
-**[Play the full MP4 recording](https://raw.githubusercontent.com/ErphanRajai/DocuMind-Local/main/docs/media/documind-study-preview.mp4)** · [Download the recording](docs/media/documind-study-preview.mp4)
+**[Play the full MP4 recording](https://cdn.jsdelivr.net/gh/ErphanRajai/DocuMind-Local@06c8b631e9bb6e2e1e1c02930b233cac563e2234/docs/media/documind-study-preview.mp4)** · [Download the original recording](docs/media/documind-study-preview.mp4)
+
+The web preview uses a public CDN copy pinned to the recorded revision. Original media is included in `docs/media/` for offline viewing after downloading the repository; the application itself does not use this CDN.
 
 The animated preview plays directly in this README. The recording shows the current Next.js study desk using public synthetic Persian notes and questions, actual local model answers, rendered equations and an answer identifying missing information. It contains no private student documents. Automatic calculation is explicitly enabled for this known example; it is off by default.
 

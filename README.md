@@ -1,169 +1,134 @@
 # DocuMind Local
 
-Drop in a PDF, ask a question, and keep the conversation in one place. DocuMind can summarize documents, help you find details, and compare up to three PDFs in a workspace. You can also chat without attaching a file.
+**English** · [فارسی](README.fa.md)
 
-The app has a quiet gray interface, a searchable conversation list, and a model picker for switching between Ollama and an API of your choice.
+An offline AI study workspace for your own PDFs. Upload study material, ask questions with clickable page references, or bring a separate homework/exam paper and work through its questions in the paper's language. Mathematical answers render with LaTeX, and supported calculations can be checked with a local symbolic calculator.
 
-![DocuMind's welcome screen](docs/media/welcome.jpg)
+DocuMind runs on your computer: **Next.js + FastAPI + Ollama + Qdrant + SQLite**. The default installation uses local models and disables hosted AI providers. No paid chatbot subscription or hosted AI API key is required for the local workflow.
 
-## See it in action
+## See it working
 
-![A short walkthrough of DocuMind](docs/media/documind-demo.gif)
+[![DocuMind: a real Persian exam, source references and rendered mathematics](docs/media/documind-study-preview.gif)](https://raw.githubusercontent.com/ErphanRajai/DocuMind-Local/main/docs/media/documind-study-preview.mp4)
 
-[Watch the screen recording](docs/media/documind-demo.mp4)
+**[Play the full MP4 recording](https://raw.githubusercontent.com/ErphanRajai/DocuMind-Local/main/docs/media/documind-study-preview.mp4)** · [Download the recording](docs/media/documind-study-preview.mp4)
 
-The demo uses fictional community-garden notes. You can [download the same sample PDF](docs/examples/community-garden-notes.pdf) and try it yourself.
+The animated preview plays directly in this README. The recording shows the current Next.js study desk using public synthetic Persian notes and questions, actual local model answers, rendered equations and an answer identifying missing information. It contains no private student documents. Automatic calculation is explicitly enabled for this known example; it is off by default.
 
-![A conversation about an uploaded document](docs/media/document-chat.jpg)
+## What you can do
 
-## Get started on Windows
+- **Chat with PDFs:** index a document once, ask follow-up questions and inspect the original pages behind citations.
+- **Study notes → question paper → answers:** choose study references separately from the exam. Process up to 20 numbered questions per run and review each result independently.
+- **Use multiple languages:** match the question's language or select an answer language, including Persian. Persian/Arabic OCR, native digits and right-to-left answer rendering are supported.
+- **Read and check mathematics:** automatic inline/display LaTeX, algebra, calculus, matrices and unit conversions through bounded SymPy/Pint tools. Review model-interpreted inputs before calculating.
+- **Study actively:** worked explanations, hints, practice questions, review of your working, saved study items and a review queue.
+- **Keep work locally:** saved workspaces, export/import, per-question results, progress, stop/retry controls and local document management.
 
-### 1. Install these once
+## Install on Windows
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/). Start it and wait until Docker is running.
-- [Python 3.10 or newer](https://www.python.org/downloads/). Select **Add Python to PATH** during installation.
-- [Ollama](https://ollama.com/download). Keep it running while you use DocuMind.
+1. [Download the project ZIP](https://github.com/ErphanRajai/DocuMind-Local/archive/refs/heads/main.zip), extract it and keep the folder in a permanent location. Alternatively:
 
-### 2. Get the project
+   ```powershell
+   git clone https://github.com/ErphanRajai/DocuMind-Local.git
+   cd DocuMind-Local
+   ```
 
-Download and extract this repository, or clone it if you have Git:
+2. Double-click **`Install_DocuMind.cmd`**. It checks Python, Node.js, Docker Desktop and Ollama; offers the official installers for missing prerequisites; downloads the models; builds the application; caches search assets; and verifies backend health. Complete any vendor, Windows permission, WSL or reboot prompts. Rerun the same installer after an interrupted setup.
+3. Open **DocuMind Local** from the desktop shortcut, or double-click **`Start_DocuMind.bat`**.
 
-```powershell
-git clone https://github.com/ErphanRajai/DocuMind-Local.git
-cd DocuMind-Local
-```
+The launcher opens the actual available local address. On this development machine that is `http://127.0.0.1:4400`; the configured default is port 4317, with fallbacks from 4400–4409. Use the address printed by your launcher.
 
-### 3. Download the local models
+This is a project-folder installer, not a standalone signed MSI. Closing the desktop window stops its app services. Existing PDFs, databases and older models are retained when setup is rerun.
 
-Open PowerShell or Command Prompt and run:
+### What gets downloaded?
 
-```powershell
-ollama pull llama3.2:3b
-ollama pull nomic-embed-text
-```
-
-These models do different jobs:
-
-| Model | What it does |
+| Component | Purpose |
 | --- | --- |
-| `llama3.2:3b` | Writes answers and summaries. This is the default chat model. |
-| `nomic-embed-text` | Helps the app search your documents. It does not generate chat answers. |
+| `qwen3:4b-instruct-2507-q4_K_M` | Default local text model for answers and explanations |
+| `bge-m3` | Multilingual document-search embeddings; it does not write answers |
+| Python/Node dependencies, Docker image and search caches | Run the interface, API, extraction and retrieval locally |
 
-You can install another chat model with `ollama pull <model-name>` and select it in the app. Keep `nomic-embed-text` installed for document search.
+Allow at least **10 GB free**; the two models alone are approximately 3.7 GB. A practical starting point is **16 GB RAM** and a compatible GPU if available. These are planning recommendations, not tested minimum requirements; CPU generation is slower. The setup script targets Python 3.12 for new launcher environments and Node.js 22 or newer.
 
-### 4. Open DocuMind
+Optional vision models and the advanced Docling layout/formula parser are separate downloads. They are not silently installed by core setup.
 
-Double-click **`Start_DocuMind.bat`** in the project folder.
+## Offline means after setup
 
-The first launch creates a Python environment, installs the interface dependencies, and builds the backend. It may take a few minutes and needs an internet connection. Later launches reuse what is already installed.
+**Initial installation needs internet** to obtain software, models and container layers. Prepare these while international downloads are available. After successful setup, installed text/PDF workflows run on `localhost` without international internet, domestic internet or an online chatbot service.
 
-DocuMind opens in a desktop window. You can also use [the browser version](http://127.0.0.1:8501). Keep the launcher window open while you work. Closing the desktop window stops the app services; in browser mode, press **Ctrl+C** in the launcher to stop them. Your saved work stays on disk.
+The default `DOCUMIND_LOCAL_ONLY=1` blocks hosted providers and remote/cloud-delegating Ollama models. Fonts and retrieval assets are cached locally. Documents, extracted text and answers stay on this computer in the default workflow. This does not make the computer an air-gapped device or prevent other installed programs from using a network.
 
-## Your first conversation
+If something is missing, setup cannot download it during an internet outage. Updates and optional model installation also need downloads. A complete offline transfer/install bundle is not currently provided.
 
-1. Choose **New workspace** in the sidebar.
-2. Use the **+** in the message box to attach a PDF. Each workspace holds up to **three PDFs**, with a **50 MB limit per file**.
-3. Type a question and press **Enter**, or send the PDF on its own for a summary.
-4. Ask follow-up questions in the same workspace. The attached documents stay available for that conversation.
+## Try the Persian sample
 
-The starter buttons fill in a suggested question. You can edit it before sending.
+1. Upload [study-fa.pdf](docs/examples/persian/study-fa.pdf) to a workspace, then open **Study desk → Exam paper**.
+2. Upload or select [exam-fa.pdf](docs/examples/persian/exam-fa.pdf) as the question paper.
+3. Select the study PDF as evidence and leave the language on **Match question / exam**, or select **فارسی**.
+4. Choose **Answer this paper**. Inspect each source and any interpreted calculator inputs.
 
-Use the sidebar to find earlier conversations. The **Workspace** menu lets you rename a conversation, download it as a text file, or delete its chat history. You can edit a previous question and regenerate the answer, too.
+The public example asks about energy, a water temperature, a quadratic equation and an unspecified laboratory name. The latest real-model sample passed 10 checks: three answered questions and one explicit **More information needed** result. That small sample is a workflow check, not an accuracy estimate for arbitrary exams.
 
-## Use your own API key
+## Accuracy and scope
 
-Open the model picker above the conversation, then choose **API key · OpenAI-compatible**. Enter your provider's:
+- A citation identifies a retrieved PDF page; it does not prove every sentence is supported.
+- A checked calculation verifies the supplied/interpreted mathematical inputs. OCR and interpretation can still be wrong. Arbitrary proofs, handwriting and diagrams are not guaranteed capabilities.
+- Scan quality, subject matter, language, model and hardware affect results. Compare important answers with the original source or a teacher-checked solution.
+- Default generation uses a budgeted 8,192-token context. Large documents are searched and processed in bounded portions; they are not all placed in one prompt.
+- The app is designed for one local computer. It does not provide institutional accounts or a production multi-user deployment.
+- The classic Streamlit UI is preserved as an optional fallback; the preview above shows the primary Next.js UI.
 
-- **API base URL**, such as `https://api.openai.com/v1`.
-- **Model ID**.
-- **API key**.
+## Troubleshooting
 
-The provider must support streaming Chat Completions in the OpenAI-compatible format. Remote endpoints must use HTTPS. A compatible local server can use HTTP on a local address; from the Docker backend, use `host.docker.internal` to reach a server running on Windows.
+Run a read-only readiness report:
 
-Your key is kept in the active interface session and is not saved in conversation history. In this mode, messages and selected document text go to the provider you choose. Its usage charges and data policies apply.
+```powershell
+.\Install_DocuMind.cmd -CheckOnly
+```
 
-Ollama and `nomic-embed-text` are still used locally to index and search PDFs, even when an API model writes the answer.
+- **Docker unavailable:** start Docker Desktop, complete its first-run/WSL setup and wait for the engine before launching again.
+- **Missing models or assets:** close DocuMind and rerun the installer while downloads are available.
+- **Interface does not open:** use the exact URL printed by the launcher; do not assume a fixed port.
+- **Need backend logs:** run `docker compose logs --tail 100 pdf_backend`. Do not publish logs containing your document text or credentials.
 
-## Where your data goes
+For manual configuration, use `.env.example` as a reference. Never replace an existing `.env` blindly or commit it to Git.
 
-With **Local · Ollama** selected, document processing, search, and answer generation run on your computer. The initial setup downloads dependencies and models; once those are available, local conversations do not need a hosted AI API.
+## Development and verification
 
-DocuMind saves the following in the project folder:
-
-| Location | Contents |
+| Location | Responsibility |
 | --- | --- |
-| `documind_sessions.json` | Conversation titles, messages, and document references. |
-| `uploaded_pdfs/` | Uploaded PDF files. |
-| `db_data/` | Document records and extracted text. |
-| `qdrant_storage/` | The document search index. |
+| `documind-web/` | Next.js/TypeScript interface, KaTeX and browser tests |
+| `pdf-summarizer-backend/app/` | FastAPI, jobs, PDF/OCR, retrieval, study and calculation tools |
+| `pdf-summarizer-backend/evaluation/` | Real-model, math, Persian and offline diagnostics |
+| `pdf-summarizer-frontend/` | Preserved Streamlit fallback |
+| `setup_documind.py`, `scripts/install-windows.ps1`, `launcher.py` | Setup and local service lifecycle |
 
-These files are excluded from Git. Deleting a workspace removes its conversation history, but does not remove the stored PDF or its search data. Removing these folders manually deletes the corresponding local data, so back them up if you want to keep it.
-
-## A few things to know
-
-- Clear, selectable PDF text works best. The app attempts OCR on image pages with little readable text; scans can take longer and may contain reading errors.
-- A long document's initial summary uses selected portions of its text. Follow-up questions search for relevant excerpts, so a summary may miss a detail elsewhere in the file.
-- Answers depend on your chosen model and the text the app can extract. Check the original document when a detail matters.
-- Local model speed depends on your hardware and model size. The app batches document embeddings, reuses connections, and streams answers as they arrive, but large models and scanned PDFs still need time.
-- This is a workspace for your own computer. It does not include user accounts or shared multi-user access.
-
-## If something does not start
-
-### Docker is unavailable
-
-Open Docker Desktop and wait until it finishes starting, then run `Start_DocuMind.bat` again.
-
-### Ollama is unavailable or a model is missing
-
-Open Ollama and run `ollama list` in a terminal. If either required model is missing, run the two `ollama pull` commands above. You can refresh the app's status under **Connection & details** in the sidebar.
-
-### Every Ollama command says “timed out waiting for server to start”
-
-Windows may have reserved Ollama's usual port, `11434`. If that is the cause, use another port:
-
-1. In Windows user environment variables, set `OLLAMA_HOST` to `127.0.0.1:21434`.
-2. Quit Ollama from its tray icon and open it again from the Start menu.
-3. Copy `.env.example` to `.env` in the project folder and change `DOCUMIND_OLLAMA_PORT` to `21434`.
-4. Open a new terminal, run `ollama list`, then restart DocuMind.
-
-The port in `.env` must match the one Ollama uses. If you already have a `.env` file, edit it instead of replacing it.
-
-### The desktop window does not open
-
-Use [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser. The launcher also falls back to a browser if the desktop view is unavailable.
-
-### You need the backend error details
-
-From the project folder, run:
+With a development Python environment installed from `pdf-summarizer-backend/requirements-dev.txt`:
 
 ```powershell
-docker compose logs -f pdf_backend
+cd pdf-summarizer-backend
+python -m pytest tests -q
+cd ../documind-web
+npm ci
+npm run test
+npm run build
+$env:DOCUMIND_TEST_URL='http://127.0.0.1:4400' # Use your running app's actual URL.
+npm run test:e2e
 ```
 
-## Start it manually
+Latest local verification: **217 backend tests, 61 frontend tests, seven browser tests and the production build passed**. Real-service checks additionally covered the Persian sample and six process-level offline checks. Many unit/browser tests use controlled substitutes; an OS-wide disconnected-machine test and clean-Windows prerequisite installation remain unverified.
 
-Keep Docker Desktop and Ollama running. From the project folder, start the backend and document search:
+Private PDFs, `.env`, databases, model storage, caches, logs and build output are excluded from Git. Back up local data and export important work before reinstalling or removing storage.
 
-```powershell
-docker compose up -d --build
-```
+## Read the implementation
 
-Then install and start the interface:
+- [Local installation, multilingual exams and code walkthrough](docs/local-installation-and-persian.md)
+- [Study and Solve: tools, data flow and tradeoffs](docs/study-and-solve.md)
+- [PDF citations and evidence](docs/pdf-citations.md)
+- [Backend processing and validation](docs/backend-processing.md)
+- [Local model performance](docs/model-performance.md)
+- [Next.js workbench](docs/workbench-upgrade.md)
+- [Study verification results](docs/study-verification.md)
 
-```powershell
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r pdf-summarizer-frontend\requirements.txt
-.venv\Scripts\python.exe -m streamlit run pdf-summarizer-frontend\app.py --server.address 127.0.0.1 --server.port 8501
-```
+## License
 
-Open [http://127.0.0.1:8501](http://127.0.0.1:8501). When finished, press **Ctrl+C** in the interface terminal and run `docker compose down` to stop the backend and search service.
-
-## Inside the project
-
-- **Streamlit** handles the interface.
-- **FastAPI** handles uploads, document processing, and streamed responses.
-- **Ollama** runs local chat and embedding models.
-- **Qdrant** combines semantic search with keyword search for document questions.
-- **SQLite** stores document records; **PyMuPDF** and **Tesseract** extract PDF text.
-
-The frontend is in `pdf-summarizer-frontend/`, the API is in `pdf-summarizer-backend/app/`, and `launcher.py` brings the local services together.
+[MIT](LICENSE). Dependencies and downloaded models retain their respective licences.

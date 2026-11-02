@@ -19,11 +19,51 @@ export function mathMarkdown(text: string) {
     )
     .join("")
     .split(/(```[\s\S]*?(?:```|$)|`[^`]*`)/g)
-    .map((part, index) => index % 2 ? part : part.replace(/\\\[([\s\S]*?)\\\]/g, (_, body) => `\n$$\n${body}\n$$\n`).replace(/\\\(([^\n]*?)\\\)/g, (_, body) => `$${body}$`))
+    .map((part, index) =>
+      index % 2
+        ? part
+        : part
+            .replace(/\\\[([\s\S]*?)\\\]/g, (_, body) => `\n$$\n${body}\n$$\n`)
+            .replace(/\\\(([^\n]*?)\\\)/g, (_, body) => `$${body}$`),
+    )
     .join("");
 }
 import type { Source } from "../lib/types";
 type Node = { type: string; value?: string; url?: string; children?: Node[] };
+export function identifierPlugin() {
+  return (tree: Node) => {
+    function walk(node: Node) {
+      if (
+        !node.children ||
+        ["code", "inlineCode", "link", "html", "math", "inlineMath"].includes(
+          node.type,
+        )
+      )
+        return;
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== "text" || !child.value) {
+          walk(child);
+          return [child];
+        }
+        const parts: Node[] = [];
+        let last = 0;
+        for (const match of child.value.matchAll(
+          /\b[A-Z]{2,}[A-Z0-9]*(?:[-_][A-Z0-9]{2,})+\b/g,
+        )) {
+          parts.push(
+            { type: "text", value: child.value.slice(last, match.index) },
+            { type: "inlineCode", value: match[0] },
+          );
+          last = match.index! + match[0].length;
+        }
+        return parts.length
+          ? [...parts, { type: "text", value: child.value.slice(last) }]
+          : [child];
+      });
+    }
+    walk(tree);
+  };
+}
 export function citationPlugin(sources: Source[]) {
   return () => (tree: Node) => {
     const ids = new Set(sources.map((s) => s.id));
@@ -40,8 +80,14 @@ export function citationPlugin(sources: Source[]) {
         }
         const parts: Node[] = [];
         let last = 0;
-        for (const match of child.value.matchAll(/\[\s*((?:S|s|س)\s*[0-9۰-۹٠-٩]+)\s*\]/g)) {
-          const id=match[1].replace(/\s/g,'').replace(/^[sس]/,'S').replace(/[۰-۹]/g,d=>String(d.charCodeAt(0)-1776)).replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-1632));
+        for (const match of child.value.matchAll(
+          /\[\s*((?:S|s|س)\s*[0-9۰-۹٠-٩]+)\s*\]/g,
+        )) {
+          const id = match[1]
+            .replace(/\s/g, "")
+            .replace(/^[sس]/, "S")
+            .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776))
+            .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
           if (!ids.has(id)) continue;
           const start = match.index!;
           parts.push(
@@ -74,7 +120,12 @@ export function Answer({
   return (
     <div className="answer" dir="auto">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, citationPlugin(sources)]}
+        remarkPlugins={[
+          remarkGfm,
+          remarkMath,
+          citationPlugin(sources),
+          identifierPlugin,
+        ]}
         rehypePlugins={[
           [
             rehypeKatex,

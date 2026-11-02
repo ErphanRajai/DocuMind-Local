@@ -6,9 +6,11 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .database import Base, engine
-from .routers import summarizer
+from .database import initialize_database
+from .routers import summarizer, document_viewer, study_state, study, jobs as job_routes
+from .services.jobs import jobs
 from .services.llm_service import LLMService
+from .services.pdf_executor import pdf_executor
 from .services.vector_db import (
     client as qdrant_client,
     init_vector_db,
@@ -21,7 +23,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize SQL tables
-    await asyncio.to_thread(Base.metadata.create_all, bind=engine)
+    await asyncio.to_thread(initialize_database)
+    await jobs.recover()
     # Compose starts the backend and Qdrant together; allow Qdrant time to accept requests.
     for attempt in range(30):
         try:
@@ -35,9 +38,12 @@ async def lifespan(app: FastAPI):
 
     # Reuse local Ollama HTTP connections across requests.
     await LLMService.startup()
+    pdf_executor.startup()
     try:
         yield
     finally:
+        await jobs.shutdown()
+        await pdf_executor.shutdown()
         await LLMService.shutdown()
 
 
@@ -56,6 +62,10 @@ app.add_middleware(
 )
 
 app.include_router(summarizer.router)
+app.include_router(document_viewer.router)
+app.include_router(job_routes.router)
+app.include_router(study_state.router)
+app.include_router(study.router)
 
 
 @app.get("/healthz")

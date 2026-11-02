@@ -1,0 +1,3 @@
+# Optional layout/formula parser. Install separately, then compare extraction
+# on your own representative documents before selecting it for reindexing.
+docling>=2,<3

@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if exist "%~dp0runtime\node\node.exe" set "PATH=%~dp0runtime\node;%~dp0runtime\ollama;%PATH%"
 
 echo ==========================================
 echo        DocuMind Local AI Workspace

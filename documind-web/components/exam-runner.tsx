@@ -6,6 +6,9 @@ import type { Document, Source } from "../lib/types";
 import { safeSources } from "../lib/workspaces";
 import { Answer } from "./answer";
 import { LanguageSelect } from "./language-select";
+import { ExamReview, type ReviewedQuestion } from "./exam-review";
+import { AnswerFeedback } from "./answer-feedback";
+import { citedSources } from "../lib/exam-export";
 import { inputMarkdown, type MathInput, type Calculation } from "../lib/study";
 export type ExamAnswer = {
   number: string;
@@ -13,6 +16,8 @@ export type ExamAnswer = {
   answer: string;
   status: string;
   sources: Source[];
+  run_id?: string;
+  question_index?: number;
   metrics?: { math?: Calculation; interpretation?: { math?: MathInput } };
 };
 export function ExamAnswers({
@@ -71,6 +76,50 @@ export function ExamAnswers({
                 )
               }
             />
+            {row.sources.length > 0 &&
+              citedSources(row.answer, row.sources).length === 0 && (
+                <details>
+                  <summary>
+                    Retrieved pages for review (no inline citations)
+                  </summary>
+                  {row.sources.map((s) => (
+                    <p key={s.id}>
+                      <a
+                        href={`/api/summarizer/documents/${s.pdf_id}/view?page=${s.page}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {s.filename} · p. {s.page}
+                      </a>
+                    </p>
+                  ))}
+                </details>
+              )}
+            {row.metrics?.math && (
+              <details className="exam-checks">
+                <summary>Calculation checks & assumptions</summary>
+                <p>
+                  {row.metrics.math.verified
+                    ? "Listed checks passed on these inputs."
+                    : "This result is not independently verified."}
+                </p>
+                <ul>
+                  {row.metrics.math.checks.map((c, i) => (
+                    <li key={i}>
+                      {c.label}: {c.passed ? "passed" : "not verified"}
+                    </li>
+                  ))}
+                </ul>
+                <p>{row.metrics.math.assumptions?.join(" ")}</p>
+              </details>
+            )}
+            {row.run_id !== undefined && row.question_index !== undefined && (
+              <AnswerFeedback
+                run={row.run_id}
+                index={row.question_index}
+                disabled={busy}
+              />
+            )}
           </article>
         );
       })}
@@ -112,6 +161,26 @@ export function ExamRunner({
     [phase, setPhase] = useState(""),
     [error, setError] = useState(""),
     [approve, setApprove] = useState(false);
+  const [style, setStyle] = useState("direct"),
+    [questions, setQuestions] = useState<ReviewedQuestion[] | undefined>(),
+    [runId, setRunId] = useState(""),
+    [history, setHistory] = useState<
+      { id: string; state: string; completed: number; exam_pdf_id: number }[]
+    >([]),
+    [resumeId, setResumeId] = useState("");
+  const [reviewTarget, setReviewTarget] = useState<
+    { index: number; request: number } | undefined
+  >();
+  const currentRun = useRef("");
+  useEffect(() => {
+    api<unknown>(
+      `/summarizer/study/exams/runs?workspace_id=${encodeURIComponent(workspaceId)}`,
+    )
+      .then((v) => {
+        if (Array.isArray(v)) setHistory(v);
+      })
+      .catch(() => {});
+  }, [workspaceId, busy]);
   const rows = answers ?? localRows,
     setRows = onAnswers ?? setLocalRows;
   const input = useRef<HTMLInputElement>(null),
@@ -119,7 +188,13 @@ export function ExamRunner({
     job = useRef<string | null>(null);
   const eligible = documents.filter((d) => d.id !== paper);
   useEffect(() => {
-    setReferences(documents.filter((d) => d.id !== paper).map((d) => d.id));
+    setReferences(
+      documents
+        .filter((d) => d.id !== paper)
+        .slice(0, 3)
+        .map((d) => d.id),
+    );
+    setReviewTarget(undefined);
     setRows([]);
   }, [paper, documents.map((d) => d.id).join(",")]);
   useEffect(() => () => controller.current?.abort(), []);
@@ -155,7 +230,7 @@ export function ExamRunner({
       if (input.current) input.current.value = "";
     }
   }
-  async function run() {
+  async function run(resume?: Record<string, unknown>) {
     setBusy(true);
     setError("");
     setRows([]);
@@ -163,7 +238,7 @@ export function ExamRunner({
     const abort = new AbortController();
     controller.current = abort;
     try {
-      const created = await api<{ id: string }>(
+      const created = await api<{ id: string; run_id?: string }>(
         "/summarizer/study/exams/jobs",
         post({
           workspace_id: workspaceId,
@@ -172,13 +247,22 @@ export function ExamRunner({
           model,
           answer_language: language,
           approve_calculations: approve,
+          answer_style: style,
+          ...(questions !== undefined ? { questions } : {}),
+          ...resume,
         }),
       );
       job.current = created.id;
+      currentRun.current = created.run_id || "";
+      setRunId(currentRun.current);
       await consumeJob(
         created.id,
         (event) => {
           if (event.type === "status") setPhase(event.message || "Working");
+          if (event.type === "metadata" && typeof event.run_id === "string") {
+            currentRun.current = event.run_id;
+            setRunId(event.run_id);
+          }
           if (event.type === "question")
             setRows((current) => [
               ...current,
@@ -189,6 +273,11 @@ export function ExamRunner({
                 status: String(event.status),
                 sources: safeSources(event.sources),
                 metrics: event.metrics as ExamAnswer["metrics"],
+                run_id: currentRun.current || undefined,
+                question_index:
+                  typeof event.question_index === "number"
+                    ? event.question_index
+                    : undefined,
               },
             ]);
           if (event.type === "error")
@@ -226,12 +315,32 @@ export function ExamRunner({
       setBusy(false);
     }
   }
+  const invalidIndex =
+    questions?.findIndex(
+      (q) =>
+        !q.text.trim() ||
+        q.text.length > 8000 ||
+        !q.number.trim() ||
+        q.number.length > 30 ||
+        !Number.isInteger(q.page) ||
+        q.page < 1,
+    ) ?? -1;
+  const invalidQuestion =
+    invalidIndex >= 0 ? questions?.[invalidIndex] : undefined;
+  const questionProblem = invalidQuestion
+    ? `Question ${invalidQuestion.number.trim() || invalidIndex + 1}: ${invalidQuestion.text.length > 8000 ? "over 8,000 characters. Split it before answering; the full text is retained." : !invalidQuestion.text.trim() ? "question text is empty. Add its text or remove the question." : !invalidQuestion.number.trim() || invalidQuestion.number.length > 30 ? "use a question number of 1–30 characters." : "choose a whole-number PDF page of at least 1."}`
+    : questions?.length === 0
+      ? "No questions remain. Add at least one question before answering."
+      : questions && questions.length > 100
+        ? "More than 100 questions are selected. Remove questions or split this paper into separate runs."
+        : "";
   return (
     <section className="exam-runner" aria-label="Answer a question paper">
       <h3>Study files → question paper → answers</h3>
       <p className="study-muted">
         The question paper is separate from the evidence. Each answer keeps its
-        own source pages. Up to 20 numbered questions per run.
+        own source pages. All readable source pages are indexed, including books
+        over 100 pages. Up to 100 reviewed questions per run.
       </p>
       <button disabled={busy} onClick={() => input.current?.click()}>
         Upload question paper
@@ -243,8 +352,14 @@ export function ExamRunner({
         hidden
         onChange={(e) => upload(e.target.files?.[0])}
       />
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy} aria-describedby="exam-reference-guidance">
         <legend>Study references</legend>
+        <p id="exam-reference-guidance" className="study-muted">
+          Choose 1–3 source PDFs. {references.length} selected.
+          {eligible.length > 3
+            ? " The first three are selected initially; change them below."
+            : ""}
+        </p>
         {eligible.length ? (
           eligible.map((d) => (
             <label className="study-checkbox" key={d.id}>
@@ -260,13 +375,37 @@ export function ExamRunner({
                 }
               />
               {d.filename}
+              {d.page_count ? ` · ${d.page_count} pages` : ""}
             </label>
           ))
         ) : (
           <p>Add study PDFs to this workspace first.</p>
         )}
       </fieldset>
+      {references.length > 3 && (
+        <p role="alert">
+          Select up to 3 source PDFs. Uncheck a reference before answering this
+          paper.
+        </p>
+      )}
       <LanguageSelect value={language} onChange={onLanguage} disabled={busy} />
+      <label>
+        Answer format
+        <select
+          value={style}
+          disabled={busy}
+          onChange={(e) => setStyle(e.target.value)}
+        >
+          <option value="direct">Direct answers</option>
+          <option value="worked">Answers with worked explanation</option>
+        </select>
+      </label>
+      <ExamReview
+        paper={paper}
+        busy={busy}
+        onQuestions={setQuestions}
+        reviewTarget={reviewTarget}
+      />
       <label className="study-checkbox">
         <input
           type="checkbox"
@@ -285,16 +424,88 @@ export function ExamRunner({
         <button
           className="primary"
           disabled={
-            busy || !paper || !references.length || references.length > 3
+            busy ||
+            !paper ||
+            !references.length ||
+            references.length > 3 ||
+            !!questionProblem
           }
-          onClick={run}
+          onClick={() => run()}
         >
           Answer this paper
         </button>
         {busy && <button onClick={stop}>Stop exam task</button>}
       </div>
+      {questionProblem && (
+        <div role="alert">
+          <p>{questionProblem}</p>
+          <button
+            disabled={busy}
+            onClick={() =>
+              setReviewTarget({
+                index: Math.max(0, invalidIndex),
+                request: (reviewTarget?.request ?? 0) + 1,
+              })
+            }
+          >
+            {invalidQuestion
+              ? `Review question ${invalidQuestion.number.trim() || invalidIndex + 1}`
+              : "Open question editor"}
+          </button>
+        </div>
+      )}
       {phase && <p role="status">{phase}</p>}
       {error && <p role="alert">{error}</p>}
+      {runId && (
+        <a
+          href={`/study/print?run=${encodeURIComponent(runId)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Print / save answers as PDF
+        </a>
+      )}
+      {history.filter((h) => h.exam_pdf_id === paper).length > 0 && (
+        <details>
+          <summary>Saved runs & recovery</summary>
+          <label>
+            Run
+            <select
+              value={resumeId}
+              disabled={busy}
+              onChange={(e) => setResumeId(e.target.value)}
+            >
+              <option value="">Choose a saved run</option>
+              {history
+                .filter((h) => h.exam_pdf_id === paper)
+                .map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.state} · {h.completed} responses · {h.id.slice(0, 8)}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button
+            disabled={busy || !resumeId}
+            onClick={async () => {
+              try {
+                const saved = await api<{ request: Record<string, unknown> }>(
+                  `/summarizer/study/exams/runs/${resumeId}`,
+                );
+                await run({ ...saved.request, run_id: resumeId });
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Could not resume.");
+              }
+            }}
+          >
+            Resume saved run
+          </button>
+          <p className="study-muted">
+            Completed responses are reused. Failed questions are retried.
+            Original sources and settings are retained.
+          </p>
+        </details>
+      )}
       {answers === undefined ? (
         <ExamAnswers rows={rows} busy={busy} onReview={onReview} />
       ) : (

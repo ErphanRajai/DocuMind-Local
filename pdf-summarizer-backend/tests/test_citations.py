@@ -211,7 +211,7 @@ async def test_retrieval_keeps_page_payload_and_represents_each_pdf(monkeypatch)
         def tolist(self): return list(self)
     sparse = SimpleNamespace(indices=Array([1]), values=Array([1.0]))
     monkeypatch.setattr(LLMService, "get_embedding", AsyncMock(return_value=[0.1]))
-    monkeypatch.setattr(vector_db.sparse_model, "embed", Mock(return_value=iter([sparse])))
+    monkeypatch.setattr(vector_db, "sparse_model", SimpleNamespace(embed=Mock(return_value=iter([sparse]))))
     requests = []
     def query(**kwargs):
         requests.append(kwargs)
@@ -230,7 +230,7 @@ async def test_index_writes_page_locations_before_removing_legacy_chunks(monkeyp
         def tolist(self): return list(self)
     sparse = SimpleNamespace(indices=Array([1]), values=Array([1.0]))
     monkeypatch.setattr(LLMService, "get_embeddings", AsyncMock(return_value=[[0.1], [0.2]]))
-    monkeypatch.setattr(vector_db.sparse_model, "embed", Mock(return_value=iter([sparse, sparse])))
+    monkeypatch.setattr(vector_db, "sparse_model", SimpleNamespace(embed=Mock(return_value=iter([sparse, sparse]))))
     calls = []
     monkeypatch.setattr(vector_db.qdrant_client, "upsert", lambda **kwargs: calls.append(("upsert", kwargs)))
     monkeypatch.setattr(vector_db.qdrant_client, "delete", lambda **kwargs: calls.append(("delete", kwargs)))

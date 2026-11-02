@@ -1,0 +1,9 @@
+// @vitest-environment node
+import {it,expect,vi,afterEach} from "vitest";
+import {NextRequest} from "next/server";
+import {GET,POST} from "../app/api/[...path]/route";
+afterEach(()=>vi.unstubAllGlobals());
+it("restricts the proxy to document API routes",async()=>{const fetcher=vi.fn();vi.stubGlobal("fetch",fetcher);const response=await GET(new NextRequest("http://localhost/api/secrets"),{params:Promise.resolve({path:["secrets"]})});expect(response.status).toBe(404);expect(fetcher).not.toHaveBeenCalled();});
+it("streams events with status and content headers",async()=>{vi.stubGlobal("fetch",vi.fn(async()=>new Response('{"type":"done"}\n',{headers:{"Content-Type":"application/x-ndjson"}})));const response=await GET(new NextRequest("http://localhost/api/summarizer/jobs/a/events?after=2"),{params:Promise.resolve({path:["summarizer","jobs","a","events"]})});expect(await response.text()).toContain('"done"');expect(response.headers.get("content-type")).toBe("application/x-ndjson");expect(vi.mocked(fetch).mock.calls[0][0]).toContain("?after=2");});
+it("forwards multipart bodies without re-encoding them",async()=>{const fetcher=vi.fn(async()=>new Response("[]"));vi.stubGlobal("fetch",fetcher);const form=new FormData();form.append("files",new Blob(["%PDF"]),"sample.pdf");await POST(new NextRequest("http://localhost/api/summarizer/upload",{method:"POST",body:form}),{params:Promise.resolve({path:["summarizer","upload"]})});expect(fetcher.mock.calls[0]).toBeDefined();});
+it("makes backend connection failure actionable",async()=>{vi.stubGlobal("fetch",vi.fn(async()=>{throw new Error("connect");}));const response=await GET(new NextRequest("http://localhost/api/healthz"),{params:Promise.resolve({path:["healthz"]})});expect(response.status).toBe(502);expect((await response.json()).detail).toContain("Docker");});

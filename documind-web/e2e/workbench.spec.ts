@@ -61,13 +61,26 @@ test("upload, answer, source page and saved conversation", async ({ page }) => {
     .getByRole("textbox", { name: "Ask DocuMind" })
     .fill("What is the budget?");
   await page.getByRole("button", { name: "Send question" }).click();
+  await page.getByRole("button", { name: "Hide PDF panel" }).click();
+  await expect(page.getByRole("region", { name: "PDF evidence" })).toBeHidden();
   await page
     .getByRole("button", { name: "Open source S1, PDF page 2" })
     .click();
   await expect(
     page.getByRole("img", { name: "Original PDF page 2 of synthetic.pdf" }),
   ).toHaveAttribute("src", /pages\/2.png$/);
-  await expect.poll(async()=>page.evaluate(()=>JSON.stringify(localStorage.getItem('documind.workspaces.v2')).includes('The approved budget is 240 dollars.'))).toBe(true);
+  await expect(
+    page.getByRole("button", { name: "Hide PDF panel" }),
+  ).toHaveAttribute("aria-expanded", "true");
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        JSON.stringify(localStorage.getItem("documind.workspaces.v2")).includes(
+          "The approved budget is 240 dollars.",
+        ),
+      ),
+    )
+    .toBe(true);
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Open source S1, PDF page 2" }),
@@ -78,6 +91,15 @@ test("mobile separates chat and evidence without overflow", async ({
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.reload();
+  await page.getByRole("button", { name: "PDF & evidence" }).click();
+  await expect(page.getByText("Keep the evidence close.")).toBeVisible();
+  await page.getByRole("button", { name: "Close PDF panel" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Ask DocuMind" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "PDF & evidence" }),
+  ).toBeFocused();
   await page.getByRole("button", { name: "PDF & evidence" }).click();
   await expect(page.getByText("Keep the evidence close.")).toBeVisible();
   expect(
@@ -95,13 +117,11 @@ test("mobile keyboard citation opens and focuses the page context", async ({
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.reload();
-  await page
-    .getByLabel("PDF files")
-    .setInputFiles({
-      name: "synthetic.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from("%PDF-synthetic"),
-    });
+  await page.getByLabel("PDF files").setInputFiles({
+    name: "synthetic.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-synthetic"),
+  });
   await expect(
     page.getByText("PDFs ready. Ask a question or choose a review."),
   ).toBeVisible();
@@ -117,9 +137,42 @@ test("mobile keyboard citation opens and focuses the page context", async ({
   await expect(
     page.getByRole("heading", { name: "synthetic.pdf, PDF page 2" }),
   ).toBeFocused();
-  await page.getByRole("button",{name:"Conversation",exact:true}).click();
-  await citation.focus();await citation.press("Enter");
-  await expect(page.getByRole("heading",{name:"synthetic.pdf, PDF page 2"})).toBeFocused();
+  await page.getByRole("button", { name: "Conversation", exact: true }).click();
+  await citation.focus();
+  await citation.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "synthetic.pdf, PDF page 2" }),
+  ).toBeFocused();
+});
+
+test("PDF panel closes into a wider conversation and reopens on the same page", async ({
+  page,
+}) => {
+  await page
+    .getByLabel("PDF files")
+    .setInputFiles({
+      name: "synthetic.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-synthetic"),
+    });
+  await expect(
+    page.getByText("PDFs ready. Ask a question or choose a review."),
+  ).toBeVisible();
+  await page.getByLabel("PDF page number").fill("2");
+  const before = await page.locator(".conversation").boundingBox();
+  await page.getByRole("button", { name: "Close PDF panel" }).click();
+  const opener = page.getByRole("button", { name: "Show PDF panel" });
+  await expect(opener).toBeFocused();
+  await expect(opener).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("region", { name: "PDF evidence" })).toBeHidden();
+  expect(
+    (await page.locator(".conversation").boundingBox())!.width,
+  ).toBeGreaterThan(before!.width);
+  await opener.press("Enter");
+  await expect(
+    page.getByRole("region", { name: "PDF evidence" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("PDF page number")).toHaveValue("2");
 });
 
 test("settings uses keyboard escape and keeps keys out of storage", async ({

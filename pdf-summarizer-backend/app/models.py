@@ -66,3 +66,13 @@ class JobJournal(Base):
     state = Column(String, nullable=False)
     payload = Column(Text, nullable=False)
     updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ExamRun(Base):
+    __tablename__ = 'exam_runs'
+    id = Column(String, primary_key=True)
+    workspace_id = Column(String, index=True, nullable=False)
+    payload = Column(Text, nullable=False)
+    state = Column(String, nullable=False, default='ready')
+    owner = Column(String, nullable=True)
+    updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))

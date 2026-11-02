@@ -2,7 +2,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -10,6 +10,41 @@ from typing import Literal
 from ..services import study_store as store, documents
 from ..models import PDFDocument
 router = APIRouter(prefix='/summarizer', tags=['Saved study work'])
+
+
+@router.get('/workspaces/{key}/archive')
+async def archive_workspace(key: str):
+    from ..services.workspace_archive import export_archive
+    data=await asyncio.to_thread(export_archive,key)
+    return Response(data,media_type='application/zip',headers={'Content-Disposition':'attachment; filename="documind-complete-workspace.zip"','Cache-Control':'no-store'})
+
+
+@router.post('/workspaces/restore',status_code=201)
+async def restore_workspace(archive: UploadFile = File(...)):
+    from ..services.workspace_archive import prepare_archive,commit_archive
+    from ..services.pdf_executor import pdf_executor
+    from ..services.pdf_processor import PDFProcessorService
+    staged=[]
+    try:
+        blob=await archive.read(200*1024*1024+1)
+        if len(blob)>200*1024*1024:raise HTTPException(413,'Use an archive up to 200 MB compressed.')
+        manifest,staged=await asyncio.to_thread(prepare_archive,blob)
+        for d,path in zip(manifest['documents'],staged):
+            await pdf_executor.run(PDFProcessorService.validate_pdf,path)
+            count=await pdf_executor.run(PDFProcessorService.page_count,path)
+            if count!=len(d['pages']):raise ValueError('Saved pages do not match the original PDF.')
+        return await asyncio.to_thread(commit_archive,manifest,staged)
+    except HTTPException:raise
+    except Exception as exc:raise HTTPException(422,'The archive is invalid, incomplete or incompatible. Existing work was not replaced.') from exc
+    finally:
+        await archive.close()
+        # Committed document paths are retained; rejected staging is removed.
+        if staged:
+            def remove_uncommitted():
+                with documents.SessionLocal() as db:
+                    used={p for (p,) in db.query(PDFDocument.file_path).filter(PDFDocument.file_path.in_(staged))}
+                documents._remove_staged([p for p in staged if p not in used])
+            await asyncio.to_thread(remove_uncommitted)
 
 
 @router.get('/library')

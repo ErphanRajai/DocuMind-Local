@@ -10,6 +10,9 @@ from pathlib import Path
 import httpx
 import streamlit as st
 
+from api_client import require_success, response_text_chunks, wait_for_documents
+from citations import cited_markdown, markdown_label, source_map, source_url
+
 st.set_page_config(page_title="DocuMind", page_icon="✦", layout="wide", initial_sidebar_state="auto")
 
 # Keep the visual system in one stylesheet, rather than layered overrides.
@@ -26,8 +29,9 @@ def get_backend_base_url() -> str:
 BACKEND_BASE_URL = get_backend_base_url()
 HEALTH_URL = f"{BACKEND_BASE_URL}/healthz"
 MODELS_URL = f"{BACKEND_BASE_URL}/summarizer/models"
+PRELOAD_URL = f"{BACKEND_BASE_URL}/summarizer/models/preload"
 REGISTRATION_URL = f"{BACKEND_BASE_URL}/summarizer/upload"
-STREAM_URL = f"{BACKEND_BASE_URL}/summarizer/upload/stream"
+SUMMARY_URL = f"{BACKEND_BASE_URL}/summarizer/summary/stream"
 CHAT_URL = f"{BACKEND_BASE_URL}/summarizer/chat"
 HISTORY_FILE = os.getenv(
     "DOCUMIND_HISTORY_FILE",
@@ -70,21 +74,48 @@ def fetch_model_directory():
     }
 
 
+@st.cache_data(ttl=600)
+def preload_selected_model(model):
+    response = httpx.post(PRELOAD_URL, json={"model": model}, timeout=3)
+    response.raise_for_status()
+    return response.status_code == 202
+
+
 def render_metrics_badge(metrics: dict):
     if not metrics or not st.session_state.get("show_response_details", False):
         return
     ttft = metrics.get("ttft_ms", 0)
     ret_ms = metrics.get("retrieval_ms", 0)
 
+    generation_details = ""
+    if metrics.get("metrics_source") == "ollama":
+        if metrics.get("tok_per_sec") is not None:
+            generation_details += f'<span><b>Generation:</b> {metrics["tok_per_sec"]} tokens/s</span>'
+        if metrics.get("generated_tokens") is not None:
+            generation_details += f'<span><b>Output:</b> {metrics["generated_tokens"]} tokens</span>'
+        if metrics.get("load_ms") is not None:
+            generation_details += f'<span><b>Model load:</b> {metrics["load_ms"]} ms</span>'
     st.markdown(
         f"""
         <div class="metrics-bar">
             <span><b>First response:</b> {ttft} ms</span>
             <span><b>Document search:</b> {ret_ms} ms</span>
+            {generation_details}
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_generation_notices(metrics):
+    if metrics.get("context_notice"):
+        st.caption(metrics["context_notice"])
+    if metrics.get("done_reason") == "length":
+        st.caption(
+            "The answer reached its length limit. Choose Longer for more detail."
+            if metrics.get("answer_length") == "short" else
+            "The answer reached its length limit. Ask a focused follow-up to continue."
+        )
 
 
 def render_pdf_badges(filenames: list):
@@ -174,68 +205,59 @@ def confirm_delete_dialog(session_id: str):
             st.rerun()
 
 
-def response_text_chunks(response, telemetry):
-    """Decode incremental UTF-8 and handle a metadata header split across packets."""
-    response.raise_for_status()
-    pending = ""
-    header_done = False
-    for text in response.iter_text():
-        if not header_done:
-            pending += text
-            if "__META__".startswith(pending):
-                continue
-            if pending.startswith("__META__"):
-                if "\n" not in pending:
-                    continue
-                header, _, text = pending.partition("\n")
-                try:
-                    telemetry.update(json.loads(header[len("__META__"):]))
-                except (ValueError, TypeError):
-                    pass
-            else:
-                text = pending
-            pending = ""
-            header_done = True
-        if text:
-            yield text
-    if pending and not pending.startswith("__META__"):
-        yield pending
-
-
 def stream_with_metrics(client, url, payload, placeholder):
     t_start = time.perf_counter()
     ttft = None
     telemetry = {}
     ai_text = ""
-    token_count = 0
     last_render = 0.0
 
-    with client.stream("POST", url, json=payload) as response:
-        for raw_text in response_text_chunks(response, telemetry):
-            if ttft is None:
-                ttft = (time.perf_counter() - t_start) * 1000.0
+    try:
+        with client.stream("POST", url, json=payload) as response:
+            for raw_text in response_text_chunks(response, telemetry):
+                if ttft is None:
+                    ttft = (time.perf_counter() - t_start) * 1000.0
+                ai_text += raw_text
+                now = time.perf_counter()
+                if now - last_render >= 0.04:
+                    placeholder.markdown(cited_markdown(ai_text, telemetry.get("sources"), BACKEND_BASE_URL) + " ▍")
+                    last_render = now
+    except Exception:
+        placeholder.markdown(cited_markdown(ai_text, telemetry.get("sources"), BACKEND_BASE_URL))
+        raise
 
-            token_count += 1
-            ai_text += raw_text
-            now = time.perf_counter()
-            if now - last_render >= 0.04:
-                placeholder.markdown(ai_text + " ▍")
-                last_render = now
-
-    placeholder.markdown(ai_text)
+    placeholder.markdown(cited_markdown(ai_text, telemetry.get("sources"), BACKEND_BASE_URL))
     t_end = time.perf_counter()
 
-    gen_duration = max(t_end - (t_start + (ttft or 0.0) / 1000.0), 0.001)
-    tok_per_sec = round(token_count / gen_duration, 1)
-
     metrics = {
+        **telemetry,
         "ttft_ms": round(ttft or 0.0, 1),
         "retrieval_ms": telemetry.get("retrieval_ms", 0.0),
         "top_score": telemetry.get("top_score", 0.0),
-        "tok_per_sec": tok_per_sec,
+        "total_response_ms": round((t_end - t_start) * 1000, 1),
     }
+    render_generation_notices(metrics)
+    render_sources(metrics)
 
     return ai_text, metrics
+
+
+def render_sources(metadata, key="live"):
+    if metadata.get("citation_warning"):
+        st.warning(metadata["citation_warning"])
+    sources = source_map(metadata.get("sources"))
+    if not sources:
+        return
+    with st.container(key=f"citation-sources-{key}"):
+        with st.expander(f"Source pages · {len(sources)}", expanded=False):
+            st.caption(metadata.get("source_notice") or "Page excerpts supplied to the model. Open a page to check the original PDF.")
+            for warning in metadata.get("warnings", []):
+                st.warning(warning)
+            for source_id, source in sources.items():
+                title = markdown_label(f"{source_id[1:]} · {source.get('filename', 'PDF')} · PDF page {source['page']}")
+                st.markdown(f"[{title}]({source_url(source, BACKEND_BASE_URL)})")
+                # Plain text prevents PDF content from becoming HTML or links.
+                st.text(source.get("excerpt", ""))
 
 
 if "sessions" not in st.session_state:
@@ -319,6 +341,9 @@ with st.sidebar:
     with st.expander(f"Documents · {len(current_session['documents'])}/3", expanded=bool(current_session['documents'])):
         if current_session["documents"]:
             render_pdf_badges([doc["filename"] for doc in current_session["documents"]])
+            for document in current_session["documents"]:
+                if document.get("warning_message"):
+                    st.warning(f"{document['filename']}: {document['warning_message']}")
         else:
             st.caption("Use the + button in the message box to attach a PDF. Send it without a question to get a summary.")
 
@@ -337,6 +362,7 @@ with st.sidebar:
             if st.button("Refresh connection", icon=":material/refresh:", use_container_width=True):
                 fetch_backend_health.clear()
                 fetch_model_directory.clear()
+                preload_selected_model.clear()
                 st.rerun()
 
 # Model settings are available from the top of the workspace without filling the sidebar.
@@ -349,6 +375,10 @@ def render_model_controls():
         if st.session_state.get("local_chat_model") not in installed_models:
             st.session_state.local_chat_model = default_model if default_model in installed_models else installed_models[0]
         selected_model = st.selectbox("Chat model", installed_models, key="local_chat_model")
+        try:
+            preload_selected_model(selected_model)
+        except httpx.HTTPError:
+            pass  # A temporary failure is not cached; the next rerun can retry.
         provider_settings = {"provider": "ollama"}
         st.caption("Your prompts and documents stay on this computer.")
         with st.expander("Add another local model"):
@@ -362,6 +392,11 @@ def render_model_controls():
         api_key = st.text_input("API key", type="password", key="provider_api_key", placeholder="Paste your API key")
         provider_settings = {"provider": "openai-compatible", "api_base_url": api_base_url.strip(), "api_key": api_key}
         st.caption("Your key is kept only in this session. Messages and relevant document text are sent to your chosen provider.")
+    answer_length = st.selectbox(
+        "Answer length", ["Short", "Longer"], key="answer_length",
+        help="Short answers are quicker. Choose Longer when you need a detailed explanation.",
+    )
+    provider_settings["answer_length"] = "long" if answer_length == "Longer" else "short"
     return model_source, selected_model, provider_settings
 
 with st.container(key="chat-toolbar"):
@@ -435,7 +470,7 @@ while idx < len(current_session["messages"]):
 
                     history_payload = [
                         {"role": m["role"], "content": m["content"]}
-                        for m in current_session["messages"][:-1]
+                        for m in current_session["messages"][:-1][-8:]
                         if m["role"] in ["user", "assistant"]
                     ]
 
@@ -473,9 +508,12 @@ while idx < len(current_session["messages"]):
         with st.chat_message(msg["role"]):
             if is_user and msg.get("files"):
                 render_pdf_badges(msg["files"])
-            st.markdown(msg["content"])
+            st.markdown(cited_markdown(msg["content"], msg.get("metrics", {}).get("sources"), BACKEND_BASE_URL)
+                        if msg["role"] == "assistant" else msg["content"])
 
         if msg["role"] == "assistant" and msg.get("metrics"):
+            render_sources(msg["metrics"], key=str(idx))
+            render_generation_notices(msg["metrics"])
             render_metrics_badge(msg["metrics"])
 
         if is_user:
@@ -614,57 +652,57 @@ if prompt_input:
                             })
                         save_sessions(st.session_state.sessions)
                     else:
-                        st.error(f"Could not upload your PDF: {upload_res.text}")
+                        require_success(upload_res)
             except Exception as e:
+                status_box.empty()
                 st.error(f"Could not upload your PDF: {str(e)}")
+                st.stop()
 
-            status_box.markdown(
-                f"""
-                <div class="pipeline-status">
-                    <span>✦</span> <span>Preparing your answer…</span>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+            active_doc_ids = [doc["id"] for doc in current_session["documents"]]
+
+            def show_processing_status(documents):
+                labels = {"pending": "Queued", "processing": "Reading", "indexing": "Indexing", "completed": "Ready", "partial": "Ready with warnings"}
+                status_box.caption(" · ".join(
+                    f"{doc['filename']}: {labels.get(doc['status'], doc['status'])}" for doc in documents
+                ))
+
+            try:
+                with httpx.Client(timeout=SOCKET_TIMEOUT) as client:
+                    ready_documents = wait_for_documents(client, BACKEND_BASE_URL, active_doc_ids, show_processing_status)
+                ready_by_id = {document["id"]: document for document in ready_documents}
+                for saved_document in current_session["documents"]:
+                    ready = ready_by_id[saved_document["id"]]
+                    saved_document.update(status=ready["status"], warning_message=ready.get("warning_message"))
+                save_sessions(st.session_state.sessions)
+                for document in ready_documents:
+                    if document.get("warning_message"):
+                        st.warning(f"{document['filename']}: {document['warning_message']}")
+            except Exception as e:
+                status_box.empty()
+                st.error(f"Could not prepare your PDFs: {e}")
+                st.stop()
+
+            status_box.caption("Preparing your answer…")
 
             with st.chat_message("assistant"):
                 ai_response = ""
                 placeholder = st.empty()
-                form_data = {"model": selected_model}
-                form_data.update(provider_settings)
+                answer_payload = {"pdf_ids": active_doc_ids, "model": selected_model, **provider_settings}
+                answer_url = SUMMARY_URL
                 if user_text:
-                    form_data["custom_prompt"] = user_text
+                    # A question attached to an upload must search every indexed
+                    # page, rather than use the default overview's page sample.
+                    answer_url = CHAT_URL
+                    answer_payload.update(question=user_text, history=[
+                        {"role": message["role"], "content": message["content"]}
+                        for message in current_session["messages"][:-1][-8:]
+                        if message["role"] in {"user", "assistant"}
+                    ])
 
                 try:
-                    t0 = time.perf_counter()
-                    ttft = None
-                    tokens = 0
-                    last_render = 0.0
                     with httpx.Client(timeout=SOCKET_TIMEOUT) as client:
-                        with client.stream(
-                            "POST", STREAM_URL, files=files_payload, data=form_data
-                        ) as response:
-                            status_box.empty()
-                            for token in response_text_chunks(response, {}):
-                                if ttft is None:
-                                    ttft = (time.perf_counter() - t0) * 1000.0
-                                tokens += 1
-                                ai_response += token
-                                now = time.perf_counter()
-                                if now - last_render >= 0.04:
-                                    placeholder.markdown(ai_response + " ▍")
-                                    last_render = now
-
-                    placeholder.markdown(ai_response)
-                    t1 = time.perf_counter()
-
-                    speed = round(tokens / max(t1 - (t0 + (ttft or 0.0) / 1000.0), 0.001), 1)
-                    metrics = {
-                        "ttft_ms": round(ttft or 0.0, 1),
-                        "retrieval_ms": 0.0,
-                        "top_score": 1.0,
-                        "tok_per_sec": speed,
-                    }
+                        ai_response, metrics = stream_with_metrics(client, answer_url, answer_payload, placeholder)
+                    status_box.empty()
                     render_metrics_badge(metrics)
 
                     current_session["messages"].append({
@@ -688,7 +726,7 @@ if prompt_input:
             # Files already present in workspace -> Multi-Doc Q&A
             history_payload = [
                 {"role": m["role"], "content": m["content"]}
-                for m in current_session["messages"][:-1]
+                for m in current_session["messages"][:-1][-8:]
                 if m["role"] in ["user", "assistant"]
             ]
             active_doc_ids = [d["id"] for d in current_session.get("documents", [])]
@@ -726,7 +764,7 @@ if prompt_input:
 
         history_payload = [
             {"role": m["role"], "content": m["content"]}
-            for m in current_session["messages"][:-1]
+            for m in current_session["messages"][:-1][-8:]
             if m["role"] in ["user", "assistant"]
         ]
 

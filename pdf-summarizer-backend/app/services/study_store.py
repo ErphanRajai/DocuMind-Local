@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import update
 
 from . import documents
-from ..models import WorkspaceRecord, WorkspaceTombstone, StudyItem, ReviewCache, JobJournal
+from ..models import WorkspaceRecord, WorkspaceTombstone, StudyItem, ReviewCache, JobJournal, ExamRun
 
 
 def encoded(value, limit=2_000_000):
@@ -59,6 +59,7 @@ def remove_workspace(key):
     with documents.SessionLocal() as db:
         db.query(WorkspaceRecord).filter_by(id=key).delete()
         db.query(StudyItem).filter_by(workspace_id=key).delete()
+        db.query(ExamRun).filter_by(workspace_id=key).delete()
         db.merge(WorkspaceTombstone(id=key))
         db.commit()
     return {'removed': key}

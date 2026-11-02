@@ -155,6 +155,7 @@ beforeEach(() => {
 async function start() {
   render(<StudyDesk />);
   await screen.findByRole("option", { name: "Exam notes" });
+  fireEvent.click(screen.getByRole("button",{name:"Solve & explain"}));
 }
 function button(name: string | RegExp) {
   return screen.getByRole("button", { name });
@@ -410,6 +411,7 @@ it("recovers journaled output after reload", async () => {
 it("uploads PDFs and transcribes images with explicit review", async () => {
   const { container } = render(<StudyDesk />);
   await screen.findByRole("option", { name: "Exam notes" });
+  fireEvent.click(screen.getByRole("button",{name:"Solve & explain"}));
   fireEvent.change(
     container.querySelector('input[accept="application/pdf"]')!,
     {
@@ -447,6 +449,7 @@ it("uploads PDFs and transcribes images with explicit review", async () => {
 it("imports backups separately and permits explicit workspace removal", async () => {
   const { container } = render(<StudyDesk />);
   await screen.findByRole("option", { name: "Exam notes" });
+  fireEvent.click(screen.getByRole("button",{name:"Solve & explain"}));
   const file = new File(["backup"], "backup.json", {
     type: "application/json",
   });

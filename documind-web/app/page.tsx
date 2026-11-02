@@ -707,7 +707,7 @@ export default function Home() {
         <div className="sidebar-bottom">
           <a href={`/study?workspace=${encodeURIComponent(active)}`}>
             <BookOpen size={16} />
-            Study & solve
+            Exam desk
             <ArrowUpRight size={14} />
           </a>
           <div className="service">
@@ -780,7 +780,7 @@ export default function Home() {
                 className="study-entry"
                 href={`/study?workspace=${encodeURIComponent(active)}`}
               >
-                Study desk <ArrowUpRight size={14} />
+                Exam desk <ArrowUpRight size={14} />
               </a>
               <div>
                 <button

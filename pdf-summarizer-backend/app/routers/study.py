@@ -18,23 +18,50 @@ from ..services import study_store
 from ..services.pdf_executor import pdf_executor
 from ..services.pdf_processor import PDFProcessorService
 from ..services.errors import ProcessingBusyError
-from ..services.exam_assistant import ExamRequest, exam_events
+from ..services.exam_assistant import ExamRequest, exam_events, prepare_run
+from ..services import exam_runs
 
 router = APIRouter(prefix='/summarizer/study', tags=['Study and Solve'])
 
 
 @router.post('/exams/jobs', status_code=202)
 async def create_exam_job(payload: ExamRequest):
+    try:
+        key,_ = await prepare_run(payload)
+        payload.run_id = key
+    except ValueError as exc:
+        raise HTTPException(422,str(exc)) from exc
     def event(kind, **data): return json.dumps({'type':kind, **data}, ensure_ascii=False) + '\n'
     async def factory():
         async def events():
             try:
                 async for line in exam_events(payload, event): yield line
             except Exception as exc:
-                yield event('error', message=str(exc) if isinstance(exc, ValueError) else 'The exam task failed. Check local services and retry.')
+                yield event('error', message=exc.detail if isinstance(exc,HTTPException) else str(exc) if isinstance(exc, ValueError) else 'The exam task failed. Check local services and retry.')
         return StreamingResponse(events(), media_type='application/x-ndjson')
     job = jobs.start('exam', factory)
-    return {'id':job.id, 'state':job.state}
+    return {'id':job.id, 'state':job.state, 'run_id':key}
+
+
+@router.get('/exams/runs')
+async def list_exam_runs(workspace_id: str = Query(max_length=100)):
+    return await asyncio.to_thread(exam_runs.listing,workspace_id)
+
+
+@router.get('/exams/runs/{key}')
+async def read_exam_run(key: str):
+    return await asyncio.to_thread(exam_runs.read,key)
+
+
+class AnswerFeedback(BaseModel):
+    question_index: int = Field(ge=0,le=99)
+    reason: str = Field(pattern='^(interpretation|calculation|citation|missing_information|other)$')
+    correction: str = Field(default='',max_length=2000)
+
+
+@router.post('/exams/runs/{key}/feedback',status_code=201)
+async def answer_feedback(key: str,payload: AnswerFeedback):
+    return await asyncio.to_thread(exam_runs.feedback,key,payload.question_index,payload.model_dump(exclude={'question_index'}))
 
 
 @router.get('/document-versions')

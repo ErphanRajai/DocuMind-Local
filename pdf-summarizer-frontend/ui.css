@@ -363,6 +363,11 @@ section[data-testid="stSidebar"] .pdf-badge { background: #f8f8f7; border-color:
 [data-testid="stExpander"] { border: 1px solid #e2e4e8; border-radius: 11px; background: rgba(255,255,255,.35); }
 [data-testid="stExpander"] summary { color: #7d8492; font-size: .77rem; }
 [data-testid="stExpander"] summary p { font-size: .77rem; }
+[class*="st-key-citation-sources-"] [data-testid="stExpander"] summary,
+[class*="st-key-citation-sources-"] [data-testid="stExpander"] summary p,
+[class*="st-key-citation-sources-"] [data-testid="stCaptionContainer"],
+[class*="st-key-citation-sources-"] [data-testid="stCaptionContainer"] p { color: var(--dm-text); }
+[class*="st-key-citation-sources-"] [data-testid="stCaptionContainer"] { opacity: 1; }
 .st-key-sidebar-tools [data-testid="stExpander"] { border-color: transparent; background: transparent; }
 [data-testid="stFileUploaderDropzone"] { border: 1px dashed #d7dce6; background: #fafafb; border-radius: 12px; color: #7e8798; padding: 1rem; }
 [data-testid="stFileUploaderDropzone"] small { color: #989fab; }

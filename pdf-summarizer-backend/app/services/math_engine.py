@@ -43,7 +43,7 @@ class MathRequest(BaseModel):
 
 def parse_expression(text, symbols, denominators=None):
     import sympy as s
-    text = normalize_digits(text).strip().strip('$').replace('\\left', '').replace('\\right', '')
+    text = normalize_digits(text).replace('\u00ad','-').strip().strip('$').replace('\\left', '').replace('\\right', '')
     for _ in range(8):
         text = re.sub(r'\\frac\{([^{}]+)\}\{([^{}]+)\}', r'((\1)/(\2))', text)
         text = re.sub(r'\\sqrt\{([^{}]+)\}', r'sqrt(\1)', text)

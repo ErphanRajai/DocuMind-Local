@@ -294,6 +294,14 @@ main {
   flex: 1;
   min-height: 0;
 }
+@media (min-width: 901px) {
+  .workbench[data-evidence-open="false"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workbench[data-evidence-open="false"] .evidence {
+    display: none;
+  }
+}
 .conversation {
   min-width: 0;
   min-height: 0;
@@ -677,10 +685,11 @@ summary {
 .evidence-header h2 {
   font-size: var(--text-body);
 }
-.evidence-header > span {
+.evidence-actions > span {
   font-size: var(--text-small);
   color: var(--color-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .documents {
   padding: 0 var(--space-md) var(--space-md);
@@ -1009,6 +1018,9 @@ summary {
     font-size: var(--text-body);
   }
   .workspace-header > .icon-button:last-child {
+    display: none;
+  }
+  .workspace-header > .pdf-panel-toggle {
     display: none;
   }
   .model-button {

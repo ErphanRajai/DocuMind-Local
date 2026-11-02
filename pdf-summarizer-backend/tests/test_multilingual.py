@@ -79,8 +79,9 @@ def test_exam_cannot_use_question_paper_as_evidence():
 
 
 @pytest.mark.anyio
-async def test_exam_uses_only_references_and_saves_per_question(monkeypatch):
+async def test_exam_uses_only_references_and_saves_per_question(monkeypatch,db_session):
     import app.services.exam_assistant as module
+    monkeypatch.setattr(module,'classify_question',AsyncMock(return_value=module.QuestionRoute(category='concept',missing_visual=False)))
     monkeypatch.setattr('app.routers.summarizer._ready_documents',AsyncMock(return_value=[]))
     monkeypatch.setattr(module.documents,'read_pages',lambda _: [{'pdf_id':2,'page':1,'text':'سؤال ۱. انرژی چیست؟'}])
     saved=[]
@@ -99,8 +100,9 @@ async def test_exam_uses_only_references_and_saves_per_question(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_exam_preserves_missing_information_status_and_counts(monkeypatch):
+async def test_exam_preserves_missing_information_status_and_counts(monkeypatch,db_session):
     import app.services.exam_assistant as module
+    monkeypatch.setattr(module,'classify_question',AsyncMock(return_value=module.QuestionRoute(category='concept',missing_visual=False)))
     monkeypatch.setattr('app.routers.summarizer._ready_documents',AsyncMock(return_value=[]))
     monkeypatch.setattr(module.documents,'read_pages',lambda _: [{'pdf_id':2,'page':1,'text':'Question 1. Name the lab'}])
     monkeypatch.setattr(module.study_store,'save_item',lambda *args:None)
@@ -125,8 +127,9 @@ def test_installer_preserves_unrelated_settings_and_is_repeatable(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_failed_exam_question_is_reported_without_losing_completed_answers(monkeypatch):
+async def test_failed_exam_question_is_reported_without_losing_completed_answers(monkeypatch,db_session):
     import app.services.exam_assistant as module
+    monkeypatch.setattr(module,'classify_question',AsyncMock(return_value=module.QuestionRoute(category='concept',missing_visual=False)))
     monkeypatch.setattr('app.routers.summarizer._ready_documents',AsyncMock(return_value=[]))
     monkeypatch.setattr(module.documents,'read_pages',lambda _: [{'pdf_id':2,'page':1,'text':'سؤال ۱. انرژی چیست؟\nسؤال ۲. دما چیست؟'}])
     saved=[];monkeypatch.setattr(module.study_store,'save_item',lambda *args:saved.append(args))

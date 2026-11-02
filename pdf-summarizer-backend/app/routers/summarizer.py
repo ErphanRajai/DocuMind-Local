@@ -1,318 +1,239 @@
+import asyncio
 import json
 import logging
-import os
-import uuid
-from typing import List, Optional
+from typing import List
 
-import httpx
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    UploadFile,
-    status,
-)
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from .. import models, schemas
-from ..database import SessionLocal, get_db
+from .. import schemas
+from ..services.documents import ingest_uploads, read_documents, update_document, save_extracted_pages
+from ..services.citations import GROUNDED_SYSTEM, bind_sources, citation_warning, ensure_page_index, summary_sources, check_quotes
+from ..services.languages import language_instruction
+from ..services.retrieval_context import retrieval_query
+from ..services.advanced_retrieval import retrieve
+from ..services.complete_review import review_events
+from ..services.errors import GenerationError, PDFProcessingError, ProcessingBusyError
 from ..services.llm_service import LLMService
+from ..services.pdf_executor import pdf_executor
 from ..services.pdf_processor import PDFProcessorService
-from ..services.vector_db import (
-    search_chunks_in_qdrant_with_scores,
-    store_chunks_in_qdrant,
-)
+from ..services.vector_db import search_page_sources, store_chunks_in_qdrant
 
 logger = logging.getLogger(__name__)
-
-router = APIRouter(
-    prefix="/summarizer",
-    tags=["PDF Summarizer"]
-)
-
-UPLOAD_DIR = "./uploaded_pdfs"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
-MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+router = APIRouter(prefix="/summarizer", tags=["PDF Summarizer"])
 
 
 @router.get("/models")
 async def list_available_models():
-    """Returns all installed Ollama models and curated recommendations."""
-    installed = await LLMService.get_available_models()
-    return {
-        "installed": installed,
-        "recommended": LLMService.RECOMMENDED_MODELS
-    }
+    import os
+    return {"installed": await LLMService.get_available_models(), "recommended": LLMService.RECOMMENDED_MODELS,
+            "default": LLMService.CHAT_MODEL, "local_only": os.getenv('DOCUMIND_LOCAL_ONLY') == '1'}
 
 
-async def process_pdf_worker(pdf_id: int, file_path: str, filename: str):
-    """Background worker for text extraction and vector indexing."""
-    db = SessionLocal()
+@router.post("/models/preload", status_code=202)
+async def preload_selected_model(payload: schemas.PreloadRequest, background_tasks: BackgroundTasks):
+    background_tasks.add_task(LLMService.preload_model, payload.model)
+    return {"model": payload.model, "status": "warming", "context_tokens": 8192, "keep_alive": "15m"}
+
+
+async def process_pdf_worker(pdf_id: int, file_path: str, filename: str, engine='standard'):
+    """Index only. Answer generation belongs to an explicit user request."""
     try:
-        pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
-        if not pdf_record:
+        exists = await asyncio.to_thread(update_document, pdf_id, status="processing", error_message=None)
+        if not exists:
             return
-
-        pdf_record.status = "processing"
-        db.commit()
-
-        extracted_text = PDFProcessorService.extract_text(file_path)
-        pdf_record.raw_text = extracted_text
-        db.commit()
-
-        chunks = PDFProcessorService.chunk_text(extracted_text, chunk_size=4000, chunk_overlap=300)
-    except Exception as e:
-        logger.exception("process_pdf_worker: extraction failed for PDF ID %s", pdf_id)
-        try:
-            db.rollback()
-            pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
-            if pdf_record:
-                pdf_record.summary = f"Error during extraction: {str(e)}"
-                pdf_record.status = "failed"
-                db.commit()
-        except Exception:
-            db.rollback()
-        return
-    finally:
-        db.close()
-
-    try:
-        if chunks:
-            await store_chunks_in_qdrant(pdf_id, chunks, filename=filename)
-        ai_summary = await LLMService.summarize_chunks(chunks)
-    except Exception as e:
-        logger.exception("process_pdf_worker: indexing failed for PDF ID %s", pdf_id)
-        db = SessionLocal()
-        try:
-            pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
-            if pdf_record:
-                pdf_record.summary = f"Error during indexing: {str(e)}"
-                pdf_record.status = "failed"
-                db.commit()
-        finally:
-            db.close()
-        return
-
-    db = SessionLocal()
-    try:
-        pdf_record = db.query(models.PDFDocument).filter(models.PDFDocument.id == pdf_id).first()
-        if pdf_record:
-            pdf_record.summary = ai_summary
-            pdf_record.status = "completed"
-            db.commit()
-    finally:
-        db.close()
-
-
-@router.post("/upload", response_model=List[schemas.PDFDocumentResponse], status_code=status.HTTP_201_CREATED)
-async def upload_pdfs(
-    background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db)
-):
-    if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded.")
-
-    uploaded_records = []
-    for file in files[:3]:
-        if not file.filename.lower().endswith(".pdf"):
-            continue
-
-        safe_filename = f"{uuid.uuid4().hex[:12]}_{file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, safe_filename)
-
-        total_bytes = 0
-        with open(file_path, "wb") as buffer:
-            while content := await file.read(1024 * 1024):
-                total_bytes += len(content)
-                if total_bytes > MAX_UPLOAD_BYTES:
-                    buffer.close()
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"File {file.filename} exceeds {MAX_UPLOAD_MB} MB limit"
-                    )
-                buffer.write(content)
-
-        new_pdf = models.PDFDocument(
-            filename=file.filename,
-            file_path=file_path,
-            status="pending"
+        extractor = PDFProcessorService.extract_document
+        if engine == 'docling':
+            from ..services.layout_extraction import extract_with_docling
+            extractor = extract_with_docling
+        result = await pdf_executor.run(extractor, file_path)
+        if not result.text.strip() or not result.chunks:
+            raise PDFProcessingError("No readable text could be extracted from this PDF.")
+        warnings = "\n".join(result.warnings) or None
+        await asyncio.to_thread(save_extracted_pages, pdf_id, result)
+        await asyncio.to_thread(update_document, pdf_id, status="indexing")
+        await store_chunks_in_qdrant(pdf_id, result.chunks, filename=filename, page_numbers=result.chunk_pages)
+        await asyncio.to_thread(
+            update_document, pdf_id, status="partial" if warnings else "completed", error_message=None, source_version=1
         )
-        db.add(new_pdf)
-        db.commit()
-        db.refresh(new_pdf)
+    except asyncio.CancelledError:
+        await asyncio.to_thread(
+            update_document, pdf_id, status="failed", error_message="Processing was interrupted. Please upload the PDF again."
+        )
+        raise
+    except Exception as exc:
+        logger.exception("Document processing failed for PDF ID %s", pdf_id)
+        message = str(exc) if isinstance(exc, (PDFProcessingError, ProcessingBusyError)) else (
+            "Document processing failed. Check Ollama and document search, then upload the PDF again."
+        )
+        await asyncio.to_thread(update_document, pdf_id, status="failed", error_message=message, summary=None)
 
-        background_tasks.add_task(process_pdf_worker, new_pdf.id, file_path, file.filename)
-        uploaded_records.append(new_pdf)
 
-    return uploaded_records
+@router.post("/upload", response_model=List[schemas.PDFDocumentResponse], status_code=201)
+async def upload_pdfs(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    records, staged = await ingest_uploads(files)
+    for record, (filename, path) in zip(records, staged):
+        if record['status'] not in {'completed', 'partial'}:
+            background_tasks.add_task(process_pdf_worker, record["id"], path, filename)
+    return records
 
 
-@router.post("/upload/stream")
-async def upload_and_stream_multi_summary(
-    files: List[UploadFile] = File(...),
-    custom_prompt: Optional[str] = Form(None),
-    model: Optional[str] = Form(None),
-    provider: str = Form("ollama"),
-    api_base_url: Optional[str] = Form(None),
-    api_key: Optional[str] = Form(None),
-):
-    all_chunks = []
-    for file in files[:3]:
-        if not file.filename.lower().endswith(".pdf"):
-            continue
+@router.post("/upload/stream", deprecated=True)
+async def retired_stream_upload():
+    # This route no longer accepts files, so it cannot bypass upload validation
+    # or accidentally create a second copy for the same answer.
+    raise HTTPException(410, "Upload once to /summarizer/upload, then POST document IDs to /summarizer/summary/stream.")
 
-        safe_filename = f"{uuid.uuid4().hex[:12]}_{file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, safe_filename)
 
-        with open(file_path, "wb") as buffer:
-            while content := await file.read(1024 * 1024):
-                buffer.write(content)
+@router.get("/documents/{pdf_id}", response_model=schemas.PDFDocumentResponse)
+async def document_status(pdf_id: int):
+    records = await asyncio.to_thread(read_documents, [pdf_id])
+    if not records:
+        raise HTTPException(404, "Document not found.")
+    return records[0]
 
-        extracted_text = PDFProcessorService.extract_text(file_path)
-        doc_header = f"=== SOURCE DOCUMENT: {file.filename} ===\n"
-        chunks = PDFProcessorService.chunk_text(doc_header + extracted_text, chunk_size=4000, chunk_overlap=300)
-        all_chunks.extend(chunks)
 
-    if not all_chunks:
-        raise HTTPException(status_code=400, detail="No readable text extracted from uploaded PDFs.")
+async def _ready_documents(pdf_ids):
+    records = await asyncio.to_thread(read_documents, pdf_ids, include_text=True)
+    if len(records) != len(pdf_ids):
+        raise HTTPException(404, "One or more selected documents were not found.")
+    for record in records:
+        if record["status"] == "failed":
+            raise HTTPException(409, f"{record['filename']}: {record['error_message'] or 'Processing failed.'}")
+        if record["status"] not in {"completed", "partial"}:
+            raise HTTPException(409, "The selected PDFs are still processing. Wait until indexing finishes.")
+        if not record["raw_text"]:
+            raise HTTPException(409, "A selected PDF has no readable text. Please upload it again.")
+    return await ensure_page_index(records)
 
+
+def _event(event_type, **values):
+    return json.dumps({"type": event_type, **values}, ensure_ascii=False) + "\n"
+
+
+async def _answer_events(tokens, metadata, metrics):
+    """Errors and completion are control events, never generated answer text."""
+    yield _event("metadata", **metadata)
+    try:
+        answer = ""
+        async for token in tokens:
+            if token:
+                answer += token
+                yield _event("text", content=token)
+        if not answer:
+            raise GenerationError("The model returned an empty answer. Please try again.")
+        warning = citation_warning(answer, metadata.get("sources", []))
+        if warning == "invalid":
+            raise GenerationError("The model used an unknown source citation. This is not a completed answer; please retry the question.")
+        if warning:
+            metrics["citation_warning"] = warning
+        checks = check_quotes(answer, metadata.get("sources", []))
+        metrics["quote_checks"] = checks
+        if any(not check["verified"] for check in checks):
+            raise GenerationError("A quotation could not be matched to its cited excerpt. This is not a completed answer; retry or ask for a paraphrase.")
+        yield _event("done", metrics=metrics)
+    except GenerationError as exc:
+        yield _event("error", message=str(exc))
+    except Exception:
+        logger.exception("Answer generation failed")
+        yield _event("error", message="The answer could not be completed. Check the model connection and try again.")
+    finally:
+        await tokens.aclose()
+
+
+def _stream(tokens, metadata=None, metrics=None):
     return StreamingResponse(
-        LLMService.stream_summarize_chunks(
-            all_chunks,
-            custom_prompt=custom_prompt,
-            model=model,
-            provider=provider,
-            api_base_url=api_base_url,
-            api_key=api_key,
-        ),
-        media_type="text/event-stream"
+        _answer_events(tokens, metadata or {}, metrics if metrics is not None else {}),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-class ChatMessage(BaseModel):
-    role: str
-    content: str
+@router.post("/summary/stream")
+async def summarize_documents(payload: schemas.SummaryRequest):
+    records = await _ready_documents(payload.pdf_ids)
+    if payload.mode == 'synthesis':
+        from ..services.synthesis import synthesis_events
+        async def consolidate():
+            try:
+                async for item in synthesis_events(payload, records, _event): yield item
+            except GenerationError as exc: yield _event('error', message=str(exc))
+        return StreamingResponse(consolidate(), media_type='application/x-ndjson')
+    if payload.mode == "complete":
+        async def events():
+            try:
+                async for item in review_events(payload, records, _event):
+                    yield item
+            except GenerationError as exc:
+                yield _event("error", message=str(exc))
+            except Exception:
+                logger.exception("Complete review failed")
+                yield _event("error", message="The review failed. Retry to resume cached segments.")
+        return StreamingResponse(events(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache"})
+    sources, readable_pages = await summary_sources(records)
+    question = payload.custom_prompt or "Summarize the documents' purpose, main findings, and important details. Cite the supporting pages."
+    return await _grounded_answer(payload, records, sources, question, spread=True,
+        extra={"summary_readable_pages": readable_pages})
 
 
-class ChatRequest(BaseModel):
-    pdf_id: Optional[int] = None
-    pdf_ids: Optional[List[int]] = []
-    question: str
-    history: Optional[List[ChatMessage]] = []
-    model: Optional[str] = None
-    provider: str = "ollama"
-    api_base_url: Optional[str] = None
-    api_key: Optional[str] = None
+async def _grounded_answer(payload, records, sources, question, history=None, spread=False, extra=None):
+    if not sources:
+        raise HTTPException(503, "No page sources were found. Check document search and try again.")
+    try:
+        language_text = payload.custom_prompt or sources[0]['text'] if isinstance(payload, schemas.SummaryRequest) else question
+        plan = await LLMService.prepare_prompt(GROUNDED_SYSTEM + ' ' + language_instruction(payload.answer_language, language_text), question, history=history, sources=sources,
+            model=payload.model, provider=payload.provider, answer_length=payload.answer_length, spread=spread)
+    except GenerationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not plan.metadata["sources"]:
+        raise HTTPException(422, "No page excerpts fit this question. Please shorten it.")
+    details = dict(extra or {})
+    if "summary_readable_pages" in details:
+        details["source_notice"] = (
+            f"Summary uses excerpts from {len(plan.metadata['sources'])} of {details['summary_readable_pages']} readable pages. "
+            "Ask a specific question to search the document further."
+        )
+    metadata = {**plan.metadata, **details,
+                "warnings": [record["warning_message"] for record in records if record["warning_message"]]}
+    import hashlib
+    metadata['document_versions'] = [{'pdf_id':record['id'],'text_sha256':hashlib.sha256((record.get('raw_text') or '').encode()).hexdigest()} for record in records]
+    metrics = dict(metadata)
+    return _stream(LLMService.stream_messages(plan.messages, model=payload.model, provider=payload.provider,
+        api_base_url=payload.api_base_url, api_key=payload.api_key,
+        answer_length=payload.answer_length, telemetry=metrics), metadata, metrics)
 
 
 @router.post("/chat")
-async def chat_with_pdf_or_general(payload: ChatRequest, db: Session = Depends(get_db)):
-    active_ids = list(payload.pdf_ids or [])
-    if payload.pdf_id and payload.pdf_id not in active_ids:
-        active_ids.append(payload.pdf_id)
-
-    relevant_chunks = []
-    scores = []
-    ret_latency_ms = 0.0
-
-    if active_ids:
-        relevant_chunks, scores, ret_latency_ms = await search_chunks_in_qdrant_with_scores(
-            pdf_ids=active_ids,
-            query_text=payload.question,
-            limit=4
-        )
-
-        doc_records = db.query(models.PDFDocument).filter(models.PDFDocument.id.in_(active_ids)).all()
-        doc_names = ", ".join([d.filename for d in doc_records])
-
-        if relevant_chunks:
-            document_context = "\n\n---\n\n".join(relevant_chunks)
-        else:
-            document_context = "\n\n".join([
-                f"=== Document: {d.filename} ===\n{d.raw_text[:4000] if d.raw_text else (d.summary or 'No text available')}"
-                for d in doc_records
-            ])
-
-        system_instruction = (
-            f"You are DocuMind, an elite AI document analysis engine reviewing: {doc_names}.\n"
-            "You have direct access to the extracted source document content provided below in [SOURCE CONTEXT].\n"
-            "Never claim you cannot view, open, or access files. Answer directly using the extracted context.\n\n"
-            f"[SOURCE CONTEXT]:\n{document_context}"
-        )
-    else:
-        system_instruction = (
-            "You are DocuMind, an intelligent, helpful, and concise AI assistant. "
-            "Help the user with programming, engineering, and technical explanations."
-        )
-
-    top_score = scores[0] if scores else (1.0 if not active_ids else 0.0)
-    avg_score = sum(scores) / len(scores) if scores else top_score
-
-    messages_payload = [{"role": "system", "content": system_instruction}]
-
-    if payload.history:
-        for msg in payload.history[-8:]:
-            messages_payload.append({"role": msg.role, "content": msg.content})
-
-    messages_payload.append({"role": "user", "content": payload.question})
-
-    selected_model = payload.model if payload.model else LLMService.CHAT_MODEL
-
-    chat_payload = {
-        "model": selected_model,
-        "messages": messages_payload,
-        "options": {"temperature": 0.2},
-        "stream": True
-    }
-
-    async def chat_stream_generator():
-        telemetry_init = {
-            "__type__": "telemetry",
-            "retrieval_ms": round(ret_latency_ms, 1),
-            "top_score": round(top_score, 3),
-            "avg_score": round(avg_score, 3),
-            "chunks_retrieved": len(relevant_chunks)
-        }
-        yield f"__META__{json.dumps(telemetry_init)}\n"
-
-        if payload.provider == "openai-compatible":
-            if not payload.api_key or not payload.api_base_url:
-                yield "[Add an API endpoint and API key in Model settings to use this provider.]"
-                return
-            async for token in LLMService.stream_openai_compatible(
-                messages_payload,
-                model=selected_model,
-                base_url=payload.api_base_url,
-                api_key=payload.api_key,
-            ):
-                yield token
-            return
-
+async def chat_with_pdf_or_general(payload: schemas.ChatRequest):
+    if payload.pdf_ids:
+        records = await _ready_documents(payload.pdf_ids)
         try:
-            client = await LLMService._client()
-            async with client.stream("POST", LLMService.API_URL, json=chat_payload) as response:
-                if response.status_code == 200:
-                    async for line in response.aiter_lines():
-                        if line:
-                            data = json.loads(line)
-                            token = data.get("message", {}).get("content", "")
-                            yield token
-                elif response.status_code == 404:
-                    yield f"[Backend Error: Model '{selected_model}' is not pulled in Ollama. Run 'ollama pull {selected_model}' in terminal to install it.]"
-                else:
-                    yield f"[Backend Error: Ollama returned HTTP {response.status_code}]"
-        except Exception as e:
-            logger.exception("Local Ollama chat request failed")
-            yield f"[Chat connection error: {type(e).__name__}. Check that Ollama is running.]"
+            query, contextual = retrieval_query(payload.question, [m.model_dump() for m in payload.history])
+            details = {}
+            if payload.search_mode == 'deep':
+                hits, details = await retrieve(payload.pdf_ids, query, payload.focus_problem)
+                retrieval_ms = details['retrieval_ms']
+            else:
+                hits, retrieval_ms = await search_page_sources(payload.pdf_ids, query)
+        except Exception as exc:
+            logger.exception("Document retrieval failed")
+            raise HTTPException(503, "Document search is unavailable. Check Ollama and Qdrant, then try again.") from exc
+        return await _grounded_answer(payload, records, bind_sources(hits, records), payload.question,
+            history=[message.model_dump() for message in payload.history],
+            extra={**details, "retrieval_ms": round(retrieval_ms, 1), "chunks_retrieved": len(hits), "contextual_retrieval": contextual,
+                   "source_notice": "Sources show the page excerpts supplied to the model. A citation is a way to check a claim, not proof that it is correct."})
+    system = "You are DocuMind, a careful local study assistant. Help students understand and check their work. State missing information rather than guessing. " + language_instruction(payload.answer_language, payload.question)
 
-    return StreamingResponse(chat_stream_generator(), media_type="text/event-stream")
+    try:
+        plan = await LLMService.prepare_prompt(
+            system, payload.question, history=[message.model_dump() for message in payload.history],
+            model=payload.model, provider=payload.provider, answer_length=payload.answer_length,
+        )
+    except GenerationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    metrics = dict(plan.metadata)
+    return _stream(LLMService.stream_messages(
+        plan.messages, model=payload.model, provider=payload.provider,
+        api_base_url=payload.api_base_url, api_key=payload.api_key,
+        answer_length=payload.answer_length, telemetry=metrics,
+    ), plan.metadata, metrics)

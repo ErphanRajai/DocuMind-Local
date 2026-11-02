@@ -7,6 +7,25 @@ import time
 
 from .vector_db import search_page_sources
 from .documents import read_pages
+from .languages import normalize_digits
+
+
+def heading_matches(question,pages):
+    """Resolve explicit numbered headings, including cross-language structural labels.
+
+    This supplements semantic search; a chapter number is an identifier, not a score.
+    """
+    labels={'chapter':'chapter','section':'section','topic':'topic','فصل':'chapter','بخش':'section','موضوع':'topic'}
+    references=re.findall(r'\b(chapter|section|topic|فصل|بخش|موضوع)\s*(\d{1,4})\b',normalize_digits(question),re.I)
+    matches=[]
+    for label,number in references:
+        canonical=labels[label.lower()]
+        aliases=[key for key,value in labels.items() if value==canonical]
+        pattern=re.compile(r'^\s*(?:'+ '|'.join(aliases)+r')\s*'+str(int(number))+r'\b',re.I|re.M)
+        for page in pages:
+            if pattern.search(normalize_digits(page['text'])):
+                matches.append({**page,'text':page['text'][:3500],'score':0.0,'match_reason':'explicit numbered heading'})
+    return matches[:6]
 
 _model = None
 _lock = threading.Lock()
@@ -48,6 +67,9 @@ async def retrieve(pdf_ids, question, focus='', use_reranker=True):
             status = 'cross-encoder'
         except Exception:
             status = 'unavailable; hybrid ranking retained'
+    pages = await asyncio.to_thread(read_pages, pdf_ids)
+    exact=heading_matches(question,pages)
+    hits=exact+[h for h in hits if not any(e['pdf_id']==h['pdf_id'] and e['page']==h['page'] for e in exact)]
     # Reserve one result per selected document before filling the global budget.
     selected = []
     for pdf_id in pdf_ids:
@@ -55,7 +77,6 @@ async def retrieve(pdf_ids, question, focus='', use_reranker=True):
         if match: selected.append(match)
     for hit in hits:
         if hit not in selected and len(selected) < 6: selected.append(hit)
-    pages = await asyncio.to_thread(read_pages, pdf_ids)
     lookup = {(p['pdf_id'], p['page']): p for p in pages}
     for hit in list(selected)[:2]:
         # Neighbor expansion preserves a definition/example continued on the next page.
@@ -63,4 +84,4 @@ async def retrieve(pdf_ids, question, focus='', use_reranker=True):
         if neighbor and neighbor['text'].strip() and not any(h['pdf_id'] == neighbor['pdf_id'] and h['page'] == neighbor['page'] for h in selected):
             selected.append({**neighbor, 'score': 0.0, 'text': neighbor['text'][:3500]})
     return selected, {'retrieval_ms': round((time.perf_counter() - start) * 1000, 1), 'search_queries': len(queries),
-                      'candidates': len(hits), 'reranker': status, 'source_notice': 'Retrieved evidence supports document claims; calculated results are separate. Search scores are not confidence probabilities.'}
+                      'candidates': len(hits), 'explicit_heading_matches':len(exact), 'reranker': status, 'source_notice': 'Retrieved evidence supports document claims; calculated results are separate. Search scores are not confidence probabilities.'}

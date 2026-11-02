@@ -32,3 +32,27 @@ documind_sessions.json
 pdf-summarizer-frontend/documind_sessions.json
 claudes plan for documind.txt
 docs/.capture/
+output/playwright/
+.playwright-cli/
+.playwright-mcp/
+.impeccable/review/
+node_modules/
+.next/
+coverage/
+playwright-report/
+test-results/
+.taste-skill/inspect/
+.taste-skill/before/
+.taste-skill/after/
+*.tsbuildinfo
+output/
+.coverage
+.coverage.*
+
+# Local design inspection output; durable product/design documentation stays tracked.
+.hallmark/
+.taste-skill/
+.impeccable/*
+!.impeccable/design.json
+!.impeccable/*-brief.md
+!.impeccable/*-documentation.md

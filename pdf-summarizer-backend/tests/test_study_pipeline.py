@@ -63,7 +63,7 @@ async def test_question_paper_reports_structured_missing_evidence(monkeypatch):
     monkeypatch.setattr(assistant,'bind_sources',lambda *args:[source])
     async def response(request,system,question,schema,sources=None):
         assert sources and 'needs_information' in system
-        return {'status':'needs_information','answer':'The lab name is not recorded. [S1]'}, {'sources':[{**source,'excerpt':source['text']}]}
+        return {'status':'answered','evidence_sufficient':False,'missing_information':['lab name'],'answer':'The lab name is not recorded. [S1]'}, {'sources':[{**source,'excerpt':source['text']}]}
     monkeypatch.setattr(assistant,'structured',response)
     rows=[json.loads(v) async for v in assistant.study_events(assistant.StudyRequest(question='Name the lab',task='notes',pdf_ids=[1],question_origin='question-paper'),event)]
     assert rows[-1]['metrics']['evidence_status']=='needs_information'

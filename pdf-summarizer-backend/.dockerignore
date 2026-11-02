@@ -1,5 +1,10 @@
 # Ignore local python virtual environments
 win_env/
+venv_win/
+coverage/
+.pytest_cache/
+.coverage
+*.bak
 venv/
 .venv/
 __pycache__/

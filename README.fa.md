@@ -16,9 +16,11 @@
 
 ## پیش‌نمایش واقعی برنامه
 
-[![پاسخ فارسی، منبع قابل‌کلیک و نمایش فرمول در داکیومایند](docs/media/documind-study-preview.gif)](https://raw.githubusercontent.com/ErphanRajai/DocuMind-Local/main/docs/media/documind-study-preview.mp4)
+[![پاسخ فارسی، منبع قابل‌کلیک و نمایش فرمول در داکیومایند](https://cdn.jsdelivr.net/gh/ErphanRajai/DocuMind-Local@06c8b631e9bb6e2e1e1c02930b233cac563e2234/docs/media/documind-study-preview.gif)](https://cdn.jsdelivr.net/gh/ErphanRajai/DocuMind-Local@06c8b631e9bb6e2e1e1c02930b233cac563e2234/docs/media/documind-study-preview.mp4)
 
-**[پخش ویدئوی کامل MP4](https://raw.githubusercontent.com/ErphanRajai/DocuMind-Local/main/docs/media/documind-study-preview.mp4)** · [دریافت فایل ویدئو](docs/media/documind-study-preview.mp4)
+**[پخش ویدئوی کامل MP4](https://cdn.jsdelivr.net/gh/ErphanRajai/DocuMind-Local@06c8b631e9bb6e2e1e1c02930b233cac563e2234/docs/media/documind-study-preview.mp4)** · [دریافت فایل اصلی ویدئو](docs/media/documind-study-preview.mp4)
+
+پیش‌نمایش وب از نسخهٔ عمومی فایل روی CDN استفاده می‌کند که به همین نسخهٔ ضبط‌شده متصل است. فایل‌های اصلی در پوشهٔ `docs/media/` هم وجود دارند و پس از دریافت پروژه می‌توان آن‌ها را آفلاین دید؛ خود برنامه از این CDN استفاده نمی‌کند.
 
 پیش‌نمایش متحرک مستقیماً در این صفحه پخش می‌شود. ویدئو رابط فعلی برنامه، یک جزوه و آزمون فارسیِ عمومی و ساختگی، پاسخ واقعی مدل محلی، فرمول‌های ریاضی و اعلام کمبود اطلاعات را نشان می‌دهد. هیچ سند خصوصی دانشجویی در آن وجود ندارد. محاسبهٔ خودکار فقط برای این نمونهٔ مشخص عمداً فعال شده است؛ در حالت پیش‌فرض، بررسی ورودی‌ها لازم است.
 

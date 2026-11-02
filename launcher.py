@@ -161,7 +161,8 @@ def stop_owned_ollama(process: subprocess.Popen | None) -> None:
 
 
 def main() -> int:
-    compose = ["docker", "compose"]
+    offline = ENVIRONMENT.get("DOCUMIND_OFFLINE_BUNDLE") == "1"
+    compose = ["docker", "compose"] + (["-f", "docker-compose.offline.yml"] if offline else [])
     if shutil.which("docker") is None:
         print("Docker was not found. Install and start Docker Desktop, then try again.")
         return 1
@@ -171,7 +172,7 @@ def main() -> int:
 
     print("Starting DocuMind services. The first launch may take a few minutes...")
     ollama_process = start_ollama_if_needed()
-    result = subprocess.run(compose + ["up", "-d", "--build"], cwd=ROOT, env=ENVIRONMENT)
+    result = subprocess.run(compose + (["up", "-d", "--pull", "never"] if offline else ["up", "-d", "--build"]), cwd=ROOT, env=ENVIRONMENT)
     if result.returncode != 0:
         stop_owned_ollama(ollama_process)
         print("Could not start the backend. Check that Docker Desktop is running.")

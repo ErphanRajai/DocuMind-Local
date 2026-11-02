@@ -25,14 +25,15 @@ from .llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "http://localhost:6333")
-COLLECTION_NAME = "pdf_chunks"
+COLLECTION_NAME = os.getenv('DOCUMIND_QDRANT_COLLECTION', 'pdf_chunks')
 DENSE_VECTOR_DIM = int(os.getenv("EMBED_VECTOR_DIM", "768"))
 
-qdrant_client = QdrantClient(url=QDRANT_HOST)
+LOCAL_INDEX_PATH = os.getenv('DOCUMIND_QDRANT_LOCAL_PATH')
+qdrant_client = QdrantClient(path=LOCAL_INDEX_PATH) if LOCAL_INDEX_PATH else QdrantClient(url=QDRANT_HOST)
 client = qdrant_client
 
 # Local CPU BM25 model via ONNX runtime
-sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25", cache_dir=os.getenv('DOCUMIND_RERANK_CACHE'), local_files_only=os.getenv('DOCUMIND_LOCAL_ONLY') == '1')
 
 
 def init_qdrant_collection():
@@ -62,9 +63,12 @@ def init_qdrant_collection():
 init_vector_db = init_qdrant_collection
 
 
-async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str = ""):
+async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str = "", page_numbers=None):
     if not chunks:
         return
+    if page_numbers is not None and len(page_numbers) != len(chunks):
+        raise ValueError("Every chunk must have a page number")
+    version = 1 if page_numbers is not None else 0
 
     # Keep CPU-bound sparse encoding off the API event loop and batch dense
     # requests to avoid one HTTP round trip per chunk on current Ollama builds.
@@ -78,7 +82,7 @@ async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str =
     for idx, (chunk, dense_vec, sparse_vec) in enumerate(
         zip(chunks, dense_embeddings, sparse_embeddings)
     ):
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"documind:{pdf_id}:{idx}"))
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"documind:{pdf_id}:v{version}:{idx}"))
         points.append(
             PointStruct(
                 id=point_id,
@@ -94,6 +98,8 @@ async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str =
                     "filename": filename,
                     "chunk_index": idx,
                     "text": chunk,
+                    "page_number": page_numbers[idx] if page_numbers is not None else None,
+                    "source_version": version,
                 },
             )
         )
@@ -107,7 +113,70 @@ async def store_chunks_in_qdrant(pdf_id: int, chunks: List[str], filename: str =
                 qdrant_client.upsert,
                 collection_name=COLLECTION_NAME,
                 points=batch,
+                wait=True,
             )
+        if version == 1:
+            # Remove only this document's old, unlocated chunks after the new
+            # index is fully written. Other documents and their IDs stay intact.
+            await asyncio.to_thread(qdrant_client.delete, collection_name=COLLECTION_NAME,
+                points_selector=models.FilterSelector(filter=models.Filter(
+                    must=[models.FieldCondition(key="pdf_id", match=models.MatchValue(value=int(pdf_id)))],
+                    should=[models.Filter(must_not=[models.FieldCondition(key="source_version", match=models.MatchValue(value=1))]),
+                            models.FieldCondition(key="chunk_index", range=models.Range(gte=len(chunks)))],
+                )), wait=True)
+
+
+async def search_page_sources(pdf_ids, query_text, per_document=3):
+    """Keep the document/page payload; reserve results for every selected PDF."""
+    started = time.perf_counter()
+    if LOCAL_INDEX_PATH or COLLECTION_NAME != 'pdf_chunks':
+        # A separate embedded index can rebuild selected documents from durable
+        # page text. Never open Docker's incompatible storage files directly.
+        from .documents import read_pages, read_documents
+        for pdf_id in pdf_ids:
+            condition = models.Filter(must=[models.FieldCondition(key='pdf_id', match=models.MatchValue(value=int(pdf_id)))])
+            count = await asyncio.to_thread(qdrant_client.count, collection_name=COLLECTION_NAME, count_filter=condition, exact=True)
+            if count.count == 0:
+                pages = await asyncio.to_thread(read_pages, [pdf_id])
+                records = await asyncio.to_thread(read_documents, [pdf_id])
+                from .pdf_processor import PDFProcessorService
+                chunks, numbers = [], []
+                for page in pages:
+                    items = PDFProcessorService.structured_chunks(page['text'])
+                    chunks.extend(items); numbers.extend([page['page']] * len(items))
+                if chunks: await store_chunks_in_qdrant(pdf_id, chunks, records[0]['filename'] if records else '', numbers)
+    dense, sparse_list = await asyncio.gather(LLMService.get_embedding(query_text),
+        asyncio.to_thread(lambda: list(sparse_model.embed([query_text]))))
+    sparse = sparse_list[0]
+
+    async def query(pdf_id):
+        condition = models.Filter(must=[
+            models.FieldCondition(key="pdf_id", match=models.MatchValue(value=int(pdf_id))),
+            models.FieldCondition(key="source_version", match=models.MatchValue(value=1)),
+        ])
+        result = await asyncio.to_thread(qdrant_client.query_points,
+            collection_name=COLLECTION_NAME,
+            prefetch=[Prefetch(query=dense, using="dense", filter=condition, limit=per_document * 4),
+                Prefetch(query=SparseVector(indices=sparse.indices.tolist(), values=sparse.values.tolist()),
+                         using="sparse", filter=condition, limit=per_document * 4)],
+            query=FusionQuery(fusion=Fusion.RRF), query_filter=condition, limit=per_document * 2)
+        # Several adjacent chunks can belong to the same page. Combine those
+        # without letting one page crowd every other source out of the prompt.
+        pages = {}
+        for hit in result.points:
+            payload = hit.payload or {}
+            page = payload.get("page_number")
+            if type(page) is not int or page < 1 or not payload.get("text"):
+                continue
+            if page not in pages:
+                if len(pages) >= per_document:
+                    continue
+                pages[page] = {"pdf_id": int(pdf_id), "page": page, "text": "", "score": float(hit.score)}
+            pages[page]["text"] += ("\n\n" if pages[page]["text"] else "") + payload["text"]
+        return list(pages.values())
+
+    results = await asyncio.gather(*(query(pdf_id) for pdf_id in pdf_ids))
+    return [source for group in results for source in group], (time.perf_counter() - started) * 1000
 
 
 async def search_chunks_in_qdrant_with_scores(

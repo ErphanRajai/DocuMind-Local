@@ -56,7 +56,15 @@ it("answers a separate paper, preserves per-answer citations and uses selected l
   expect(props.onLanguage).toHaveBeenCalledWith("fa");
   fireEvent.click(screen.getByText("Answer this paper"));
   await screen.findByText("Question 1 · Answer ready for review");
-  const request = JSON.parse(String(vi.mocked(api).mock.calls[0][1]?.body));
+  const request = JSON.parse(
+    String(
+      vi
+        .mocked(api)
+        .mock.calls.find(
+          (call) => call[0] === "/summarizer/study/exams/jobs",
+        )?.[1]?.body,
+    ),
+  );
   expect(request.reference_pdf_ids).toEqual([1]);
   expect(request.exam_pdf_id).toBe(2);
   expect(request.approve_calculations).toBe(false);
@@ -84,9 +92,12 @@ it("handles rejected exam creation and excludes the selected paper from referenc
   );
   expect(screen.queryByText("exam-fa.pdf")).toBeNull();
   fireEvent.click(screen.getByText("Answer this paper"));
-  await screen.findByRole("alert");
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Local model unavailable",
+  await waitFor(() =>
+    expect(
+      screen
+        .getAllByRole("alert")
+        .some((el) => el.textContent?.includes("Local model unavailable")),
+    ).toBe(true),
   );
 });
 it("uploads question papers without adding them as study evidence", async () => {
@@ -118,10 +129,25 @@ it("normalizes common model math delimiters while preserving code and RTL prose"
   expect(container.querySelector(".answer")).toHaveAttribute("dir", "auto");
   expect(container.querySelector(".katex")).not.toBeNull();
 });
-it('links Persian source-label variants only when the server supplied that source',()=>{
-  const source={id:'S1',pdf_id:1,page:1,filename:'study-fa.pdf',excerpt:'انرژی'};
-  render(<Answer text={'پاسخ [ س ۱ ] و ناشناخته [س۹۹]'} sources={[source]} onSource={()=>{}}/>);
-  expect(screen.getAllByRole('button')).toHaveLength(1);expect(screen.getByRole('button')).toHaveAccessibleName('Open source S1, PDF page 1');
+it("links Persian source-label variants only when the server supplied that source", () => {
+  const source = {
+    id: "S1",
+    pdf_id: 1,
+    page: 1,
+    filename: "study-fa.pdf",
+    excerpt: "انرژی",
+  };
+  render(
+    <Answer
+      text={"پاسخ [ س ۱ ] و ناشناخته [س۹۹]"}
+      sources={[source]}
+      onSource={() => {}}
+    />,
+  );
+  expect(screen.getAllByRole("button")).toHaveLength(1);
+  expect(screen.getByRole("button")).toHaveAccessibleName(
+    "Open source S1, PDF page 1",
+  );
 });
 it("shows pending calculator inputs and opens them for explicit review", async () => {
   const input = {
@@ -155,4 +181,57 @@ it("shows pending calculator inputs and opens them for explicit review", async (
   expect(container.querySelector(".katex")).not.toBeNull();
   fireEvent.click(screen.getByText("Review in solver"));
   expect(review).toHaveBeenCalledWith("حل کنید", input);
+});
+
+it("explains the reference limit and allows deselection to recover", async () => {
+  render(
+    <ExamRunner
+      {...props}
+      documents={[1, 3, 4, 5].map((id) => ({
+        id,
+        filename: `source-${id}.pdf`,
+        status: "completed",
+      }))}
+    />,
+  );
+  expect(
+    screen.getByText(/Choose 1–3 source PDFs. 3 selected/),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("source-5.pdf")).not.toBeChecked();
+  fireEvent.click(screen.getByLabelText("source-5.pdf"));
+  expect(screen.getByRole("alert")).toHaveTextContent("Uncheck a reference");
+  expect(screen.getByText("Answer this paper")).toBeDisabled();
+  fireEvent.click(screen.getByLabelText("source-1.pdf"));
+  expect(screen.getByText("Answer this paper")).toBeEnabled();
+});
+
+it("opens the offending long question from the blocked submission and recovers after correction", async () => {
+  vi.mocked(api).mockImplementation(async (path) =>
+    path.includes("/papers/")
+      ? {
+          questions: [
+            { number: "1", text: "Valid question", page: 1 },
+            { number: "2", text: "Long text ".repeat(900), page: 1 },
+          ],
+        }
+      : [],
+  );
+  const { container } = render(<ExamRunner {...props} />);
+  await screen.findByText(/Question 2: over 8,000 characters/);
+  expect(screen.getByText("Answer this paper")).toBeDisabled();
+  expect(container.querySelector(".exam-question-review")).not.toHaveAttribute(
+    "open",
+  );
+  fireEvent.click(screen.getByText("Review question 2"));
+  expect(container.querySelector(".exam-question-review")).toHaveAttribute(
+    "open",
+  );
+  expect(screen.getByLabelText("Full question text")).toHaveValue(
+    "Long text ".repeat(900),
+  );
+  fireEvent.change(screen.getByLabelText("Full question text"), {
+    target: { value: "Corrected second question" },
+  });
+  expect(screen.queryByText(/Question 2: over 8,000 characters/)).toBeNull();
+  expect(screen.getByText("Answer this paper")).toBeEnabled();
 });

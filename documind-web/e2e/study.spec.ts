@@ -25,6 +25,7 @@ test.beforeEach(async({page})=>{
     return route.fulfill({json:{}});
   });
   await page.goto('/study');
+  await page.getByRole('button',{name:'Solve & explain',exact:true}).click();
 });
 
 test('calculator renders mathematics and focuses its checked result',async({page})=>{

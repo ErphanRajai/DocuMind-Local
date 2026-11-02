@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Answer } from "./answer";
 import { ExamRunner, ExamAnswers, type ExamAnswer } from "./exam-runner";
+import { WorkspaceTransfer } from "./workspace-transfer";
 import { LanguageSelect } from "./language-select";
 import { api, post, consumeJob, waitDocuments } from "../lib/api";
 import {
@@ -52,7 +53,7 @@ const starter: MathInput = {
 export function StudyDesk() {
   const [spaces, setSpaces] = useState<Workspace[]>([]),
     [active, setActive] = useState(""),
-    [tab, setTab] = useState("solve");
+    [tab, setTab] = useState("paper");
   const [tool, setTool] = useState<MathInput>(starter),
     [extra, setExtra] = useState(""),
     [working, setWorking] = useState("");
@@ -644,11 +645,12 @@ export function StudyDesk() {
       </header>
       <div className="study-title">
         <div>
-          <h1>Study desk</h1>
-          <p>Understand the source. Work the problem. Check the result.</p>
+          <h1>Exam desk</h1>
+          <p>Answer a question paper from your source PDFs.</p>
         </div>
         <span className="study-local">Saved on this computer</span>
       </div>
+      <WorkspaceTransfer workspace={active} disabled={busy||examBusy}/>
       <nav className="study-tabs" aria-label="Study tools">
         {[
           ["solve", "Solve & explain"],
@@ -1381,10 +1383,9 @@ export function StudyDesk() {
       {tab === "paper" && (
         <div className="study-grid paper-grid">
           <section className="study-input">
-            <h2>Work through a paper.</h2>
+            <h2>Answer a paper.</h2>
             <p className="study-muted">
-              Questions keep their page references. Check detected boundaries
-              and marks before solving.
+              Choose the question paper and your source documents. Direct answers retain their source pages.
             </p>
             <label>
               Exam PDF

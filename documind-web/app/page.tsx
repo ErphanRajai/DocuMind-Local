@@ -8,6 +8,8 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   BookOpen,
   FileText,
   Paperclip,
@@ -24,7 +26,11 @@ import {
 } from "lucide-react";
 import { Answer } from "../components/answer";
 import { PDFPage } from "../components/pdf-page";
-import { loadSavedWorkspaces, persistWorkspace, mergeWorkspaceCopies } from "../lib/persistence";
+import {
+  loadSavedWorkspaces,
+  persistWorkspace,
+  mergeWorkspaceCopies,
+} from "../lib/persistence";
 import { api, post, consumeJob, waitDocuments } from "../lib/api";
 import {
   STORAGE_KEY,
@@ -60,6 +66,7 @@ export default function Home() {
     [apiKey, setApiKey] = useState("");
   const [localOnly, setLocalOnly] = useState(false);
   const [rail, setRail] = useState(true),
+    [evidenceOpen, setEvidenceOpen] = useState(true),
     [mobileView, setMobileView] = useState("chat"),
     [filter, setFilter] = useState(""),
     [selected, setSelected] = useState<Source | null>(null);
@@ -77,6 +84,8 @@ export default function Home() {
     mode?: "quick" | "complete";
   } | null>(null);
   const jobRef = useRef<string | null>(null),
+    evidenceToggle = useRef<HTMLButtonElement>(null),
+    evidenceTab = useRef<HTMLButtonElement>(null),
     evidenceHeading = useRef<HTMLHeadingElement>(null),
     focusEvidence = useRef(false),
     controller = useRef<AbortController | null>(null),
@@ -105,7 +114,7 @@ export default function Home() {
         "Browser storage is unavailable. Export important conversations before closing.",
       );
     }
-    const browserValues=values;
+    const browserValues = values;
     if (!values.length) values = [newWorkspace()];
     setWorkspaces(values);
     setActive(values[0].id);
@@ -114,8 +123,14 @@ export default function Home() {
       .then((saved) => {
         revisions.current = saved.revisions;
         {
-          const merged = mergeWorkspaceCopies(saved.values, browserValues, saved.deletedIds);
-          const readyValues = merged.length ? merged : [browserValues.length ? newWorkspace() : values[0]];
+          const merged = mergeWorkspaceCopies(
+            saved.values,
+            browserValues,
+            saved.deletedIds,
+          );
+          const readyValues = merged.length
+            ? merged
+            : [browserValues.length ? newWorkspace() : values[0]];
           setWorkspaces(readyValues);
           let pending: string | undefined;
           try {
@@ -124,8 +139,7 @@ export default function Home() {
             )?.workspace;
           } catch {}
           setActive(
-            readyValues.find((w) => w.id === pending)?.id ||
-              readyValues[0].id,
+            readyValues.find((w) => w.id === pending)?.id || readyValues[0].id,
           );
         }
         setRemoteReady(true);
@@ -136,14 +150,18 @@ export default function Home() {
         );
         setRemoteReady(true);
       });
-    api<{ installed: string[]; default?: string; local_only?: boolean }>("/summarizer/models")
+    api<{ installed: string[]; default?: string; local_only?: boolean }>(
+      "/summarizer/models",
+    )
       .then((v) => {
         setModels(v.installed);
         setLocalOnly(Boolean(v.local_only));
         setModel(
-          v.default && v.installed.includes(v.default) ? v.default : v.installed.includes("llama3.2:3b")
-            ? "llama3.2:3b"
-            : v.installed[0] || "llama3.2:3b",
+          v.default && v.installed.includes(v.default)
+            ? v.default
+            : v.installed.includes("llama3.2:3b")
+              ? "llama3.2:3b"
+              : v.installed[0] || "llama3.2:3b",
         );
       })
       .catch(() => setError("Could not list models. Check the local backend."));
@@ -261,8 +279,9 @@ export default function Home() {
     setMobileView("chat");
   }
   function openSource(source: Source) {
-    focusEvidence.current = window.innerWidth <= 900;
-    if (focusEvidence.current) setRail(false);
+    focusEvidence.current = true;
+    if (window.innerWidth <= 900) setRail(false);
+    setEvidenceOpen(true);
     setSelected(source);
     setPage(source.page);
     setViewDoc(
@@ -274,12 +293,17 @@ export default function Home() {
     );
     setMobileView("evidence");
   }
+  function closeEvidence() {
+    setEvidenceOpen(false);
+    setMobileView("chat");
+    (window.innerWidth <= 900 ? evidenceTab : evidenceToggle).current?.focus();
+  }
   useEffect(() => {
     if (focusEvidence.current) {
       focusEvidence.current = false;
       evidenceHeading.current?.focus({ preventScroll: true });
     }
-  }, [selected, mobileView]);
+  }, [selected, mobileView, evidenceOpen]);
   useEffect(() => {
     if (!remoteReady || !workspace || recovering.current) return;
     let pending: {
@@ -746,6 +770,23 @@ export default function Home() {
             <SlidersHorizontal size={14} />
           </button>
           <button
+            ref={evidenceToggle}
+            className="icon-button pdf-panel-toggle"
+            aria-label={evidenceOpen ? "Hide PDF panel" : "Show PDF panel"}
+            title={evidenceOpen ? "Hide PDF panel" : "Show PDF panel"}
+            aria-expanded={evidenceOpen}
+            aria-controls="pdf-evidence"
+            onClick={() =>
+              evidenceOpen ? closeEvidence() : setEvidenceOpen(true)
+            }
+          >
+            {evidenceOpen ? (
+              <PanelRightClose size={18} />
+            ) : (
+              <PanelRightOpen size={18} />
+            )}
+          </button>
+          <button
             className="icon-button"
             aria-label="Export conversation"
             onClick={exportWorkspace}
@@ -761,8 +802,13 @@ export default function Home() {
             Conversation
           </button>
           <button
+            ref={evidenceTab}
             aria-pressed={mobileView === "evidence"}
-            onClick={() => setMobileView("evidence")}
+            aria-controls="pdf-evidence"
+            onClick={() => {
+              setEvidenceOpen(true);
+              setMobileView("evidence");
+            }}
           >
             PDF & evidence {sources.length ? `(${sources.length})` : ""}
           </button>
@@ -773,7 +819,11 @@ export default function Home() {
             <button onClick={exportWorkspace}>Export conversation</button>
           </div>
         )}
-        <div className="workbench" data-mobile-view={mobileView}>
+        <div
+          className="workbench"
+          data-mobile-view={mobileView}
+          data-evidence-open={evidenceOpen}
+        >
           <section className="conversation" aria-label="Conversation">
             <div className="conversation-toolbar">
               <a
@@ -1131,7 +1181,11 @@ export default function Home() {
               />
             </div>
           </section>
-          <section className="evidence" aria-label="PDF evidence">
+          <section
+            id="pdf-evidence"
+            className="evidence"
+            aria-label="PDF evidence"
+          >
             <div className="evidence-header">
               <div>
                 <BookOpen size={17} />
@@ -1147,7 +1201,17 @@ export default function Home() {
                   Source material
                 </h2>
               </div>
-              <span>{documents.length}/3 PDFs</span>
+              <div className="evidence-actions">
+                <span>{documents.length}/3 PDFs</span>
+                <button
+                  className="icon-button"
+                  aria-label="Close PDF panel"
+                  title="Close PDF panel"
+                  onClick={closeEvidence}
+                >
+                  <X size={17} />
+                </button>
+              </div>
             </div>
             <div className="documents">
               {documents.map((doc) => (
@@ -1380,7 +1444,10 @@ export default function Home() {
                 disabled={busy}
               >
                 <option value="ollama">Local Ollama</option>
-                <option value="openai-compatible" disabled={localOnly}>Compatible API{localOnly ? ' (disabled in local-only mode)' : ''}</option>
+                <option value="openai-compatible" disabled={localOnly}>
+                  Compatible API
+                  {localOnly ? " (disabled in local-only mode)" : ""}
+                </option>
               </select>
             </label>
             {provider === "ollama" ? (

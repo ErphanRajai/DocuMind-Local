@@ -666,3 +666,23 @@
   .study-input, .study-output { padding-top: 20px; }
   .study-alert { padding-top: 10px; padding-bottom: 10px; }
 }
+
+/* Exam workflow uses the incumbent flat forms and reading surface. */
+.workspace-transfer {display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:0 32px 20px;font-size:14px}
+.workspace-transfer .study-muted {flex-basis:100%;font-size:12px}
+.exam-question-review,.answer-feedback,.exam-checks {margin-block:20px}
+.exam-question-review summary,.answer-feedback summary,.exam-checks summary {cursor:pointer;padding-block:8px;text-underline-offset:3px}
+.exam-review-grid {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-block:16px}
+.exam-review-grid > * {min-width:0}
+.exam-review-grid img {width:100%;height:auto;display:block;margin-top:12px}
+.exam-review-grid textarea,.answer-feedback textarea {width:100%;font:inherit}
+.exam-review-grid input,.exam-review-grid select,.answer-feedback select {width:100%}
+.exam-checks pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+.exam-print {max-width:900px;padding:32px;margin:auto;font:16px/1.8 var(--font-body)}
+.exam-print article {border-top:1px solid var(--line);padding-block:24px;break-inside:avoid-page}
+.exam-print li {overflow-wrap:anywhere}
+.print-controls {display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+@media(max-width:600px){.exam-review-grid{grid-template-columns:1fr}.workspace-transfer{padding-inline:20px}.exam-print{padding:20px}}
+@media print {.print-controls{display:none!important}.exam-print{max-width:none;padding:0}.exam-print article{break-inside:auto}.exam-print h2{break-after:avoid}.exam-print .answer{overflow:visible}.exam-print button.citation{border:0;background:none;color:inherit} @page{margin:18mm}}
+
+.answer :not(pre) > code {direction:ltr;unicode-bidi:isolate;display:inline-block;max-width:100%;white-space:nowrap;overflow-x:auto;vertical-align:middle}

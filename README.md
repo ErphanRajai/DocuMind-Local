@@ -16,10 +16,12 @@ The web preview uses a public CDN copy pinned to the recorded revision. Original
 
 The animated preview plays directly in this README. The recording shows the current Next.js study desk using public synthetic Persian notes and questions, actual local model answers, rendered equations and an answer identifying missing information. It contains no private student documents. Automatic calculation is explicitly enabled for this known example; it is off by default.
 
+The **Exam desk** prioritizes direct answers from the selected source PDFs, including sources over 100 pages. Explanations are optional. Question correction, run recovery, feedback, printable answers and complete workspace ZIP backup are described in the [exam workflow guide](docs/exam-reliability.md).
+
 ## What you can do
 
 - **Chat with PDFs:** index a document once, ask follow-up questions and inspect the original pages behind citations.
-- **Study notes → question paper → answers:** choose study references separately from the exam. Process up to 20 numbered questions per run and review each result independently.
+- **Study notes → question paper → answers:** choose study references separately from the exam. Process up to 100 reviewed questions per run and review each result independently.
 - **Use multiple languages:** match the question's language or select an answer language, including Persian. Persian/Arabic OCR, native digits and right-to-left answer rendering are supported.
 - **Read and check mathematics:** automatic inline/display LaTeX, algebra, calculus, matrices and unit conversions through bounded SymPy/Pint tools. Review model-interpreted inputs before calculating.
 - **Study actively:** worked explanations, hints, practice questions, review of your working, saved study items and a review queue.
@@ -59,7 +61,7 @@ Optional vision models and the advanced Docling layout/formula parser are separa
 
 The default `DOCUMIND_LOCAL_ONLY=1` blocks hosted providers and remote/cloud-delegating Ollama models. Fonts and retrieval assets are cached locally. Documents, extracted text and answers stay on this computer in the default workflow. This does not make the computer an air-gapped device or prevent other installed programs from using a network.
 
-If something is missing, setup cannot download it during an internet outage. Updates and optional model installation also need downloads. A complete offline transfer/install bundle is not currently provided.
+If something is missing, setup cannot download it during an internet outage. Updates and optional model installation also need downloads. A Windows x64 offline transfer bundle can now be prepared before an outage; see the [exam reliability and offline transfer guide](docs/exam-reliability.md).
 
 ## Try the Persian sample
 
@@ -117,7 +119,7 @@ $env:DOCUMIND_TEST_URL='http://127.0.0.1:4400' # Use your running app's actual U
 npm run test:e2e
 ```
 
-Latest local verification: **217 backend tests, 61 frontend tests, seven browser tests and the production build passed**. Real-service checks additionally covered the Persian sample and six process-level offline checks. Many unit/browser tests use controlled substitutes; an OS-wide disconnected-machine test and clean-Windows prerequisite installation remain unverified.
+Latest local verification: **232 backend tests, 66 frontend tests, seven browser tests and the production build passed**. A generated bilingual 50-case exam benchmark used a real question PDF and a 120-page source; all 50 answer checks and all 30 expected-page citation checks passed. This is synthetic regression evidence, not a claim of real-exam accuracy. Complete workspace backup/restore and saved-run reuse were also tested against the running services. Many unit/browser tests use controlled substitutes; an OS-wide disconnected-machine test and clean-Windows prerequisite installation remain unverified.
 
 Private PDFs, `.env`, databases, model storage, caches, logs and build output are excluded from Git. Back up local data and export important work before reinstalling or removing storage.
 
@@ -130,6 +132,7 @@ Private PDFs, `.env`, databases, model storage, caches, logs and build output ar
 - [Local model performance](docs/model-performance.md)
 - [Next.js workbench](docs/workbench-upgrade.md)
 - [Study verification results](docs/study-verification.md)
+- [Exam answering, recovery, complete backups and offline transfer](docs/exam-reliability.md)
 
 ## License
 

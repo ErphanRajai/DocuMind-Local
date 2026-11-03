@@ -68,3 +68,13 @@ def test_final_metrics_do_not_depend_on_network_packet_count():
     assert list(api.response_text_chunks(response, telemetry)) == ["A long answer delivered in one chunk."]
     assert telemetry["generated_tokens"] == 50 and telemetry["tok_per_sec"] == 25.0
     assert telemetry["retrieval_ms"] == 12
+
+
+def test_retry_replaces_draft_in_classic_client_without_duplicate_text():
+    telemetry={};text=''
+    response=stream([{'type':'status','message':'Question 1'}, {'type':'text','content':'First answer\n'},
+        {'type':'text','content':'Bad second draft'}, {'type':'replace_text','content':'First answer\n'},
+        {'type':'text','content':'Correct second answer'}, {'type':'done'}])
+    for chunk in api.response_text_chunks(response,telemetry):
+        text=chunk if telemetry.pop('_replace_text',False) else text+chunk
+    assert text=='First answer\nCorrect second answer'

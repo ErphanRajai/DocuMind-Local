@@ -11,7 +11,7 @@ from ..schemas import ChatRequest
 from .llm_service import LLMService
 from .math_engine import MathRequest, solve_bounded
 from .errors import GenerationError
-from .citations import GROUNDED_SYSTEM, bind_sources, check_quotes, citation_warning
+from .citations import GROUNDED_SYSTEM, bind_sources, check_quotes, citation_warning, quotes_requested
 from .advanced_retrieval import retrieve
 from . import documents
 from .languages import normalize_digits, detect_language, language_instruction, localize_calculation
@@ -303,7 +303,7 @@ async def study_events(request, event):
                 'Explain what is missing in answer; never invent a value. Set evidence_sufficient=false and list missing_information when the requested answer cannot be established. A correct statement that a requested fact is absent is needs_information, NOT answered. Otherwise use answered, evidence_sufficient=true and missing_information=[]. Preserve source markers. Give the direct answer first; do not tutor unless requested.',
                 question, EvidenceAnswer.model_json_schema(), sources=sources)
             result = EvidenceAnswer.model_validate(value)
-            if any(not item['verified'] for item in check_quotes(result.answer,details.get('sources',[]))):
+            if any(not item['verified'] for item in check_quotes(result.answer,details.get('sources',[]),strict=quotes_requested(request.question),question=request.question)):
                 yield event('status',phase='checking',message='Checking the answer against its source wording')
                 value,details=await structured(request,system+' The previous attempt used a quotation that did not match the evidence. Paraphrase without quotation marks, unless explicitly asked to quote, in which case copy the original source language exactly. Preserve valid source IDs.',question,EvidenceAnswer.model_json_schema(),sources=sources)
                 result=EvidenceAnswer.model_validate(value)
@@ -331,7 +331,7 @@ async def study_events(request, event):
         provided = metadata.get('sources', [])
         if citation_warning(answer, provided) == 'invalid': raise GenerationError('The answer used an unknown citation. Retry the question.')
         if provided and not re.search(r'\[S\d+\]', answer): telemetry['citation_warning'] = 'No inline citations were supplied. Check the retrieved pages.'
-        telemetry['quote_checks'] = check_quotes(answer, provided)
+        telemetry['quote_checks'] = check_quotes(answer, provided, strict=quotes_requested(request.question),question=request.question)
         if any(not item['verified'] for item in telemetry['quote_checks']): raise GenerationError('An explicit quote did not match its evidence. Retry without quoting.')
     telemetry['pipeline_ms'] = round((time.perf_counter() - started) * 1000, 1)
     yield event('done', metrics={**metadata, **telemetry})

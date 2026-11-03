@@ -1,4 +1,9 @@
 import type { Document, StreamEvent } from "./types";
+export function applyAnswerText(current: string, event: StreamEvent): string {
+  if (event.type === "replace_text") return event.content || "";
+  return event.type === "text" ? current + (event.content || "") : current;
+}
+
 export async function api<T>(
   path: string,
   options: RequestInit = {},

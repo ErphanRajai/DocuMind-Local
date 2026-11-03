@@ -26,12 +26,13 @@ import {
 } from "lucide-react";
 import { Answer } from "../components/answer";
 import { PDFPage } from "../components/pdf-page";
+import { ModelLibrary } from "../components/model-library";
 import {
   loadSavedWorkspaces,
   persistWorkspace,
   mergeWorkspaceCopies,
 } from "../lib/persistence";
-import { api, post, consumeJob, waitDocuments } from "../lib/api";
+import { api, post, consumeJob, waitDocuments, applyAnswerText } from "../lib/api";
 import {
   STORAGE_KEY,
   newWorkspace,
@@ -57,6 +58,7 @@ export default function Home() {
     [phase, setPhase] = useState(""),
     [error, setError] = useState("");
   const [models, setModels] = useState<string[]>([]),
+    [recommendedModels, setRecommendedModels] = useState<string[]>([]),
     [model, setModel] = useState("llama3.2:3b"),
     [length, setLength] = useState("short"),
     [health, setHealth] = useState("Checking services");
@@ -150,11 +152,12 @@ export default function Home() {
         );
         setRemoteReady(true);
       });
-    api<{ installed: string[]; default?: string; local_only?: boolean }>(
+    api<{ installed: string[]; recommended?: { name: string }[]; default?: string; local_only?: boolean }>(
       "/summarizer/models",
     )
       .then((v) => {
         setModels(v.installed);
+        setRecommendedModels(v.recommended?.map(row => row.name) || []);
         setLocalOnly(Boolean(v.local_only));
         setModel(
           v.default && v.installed.includes(v.default)
@@ -366,8 +369,8 @@ export default function Home() {
           };
           amend(saved.assistant, (m) => ({ ...m, metrics: details }));
         }
-        if (event.type === "text") {
-          text += event.content || "";
+        if (event.type === "text" || event.type === "replace_text") {
+          text = applyAnswerText(text, event);
           amend(saved.assistant, (m) => ({
             ...m,
             content: text,
@@ -593,9 +596,9 @@ export default function Home() {
             )
               setProgress({ total: event.total, completed: event.completed });
           }
-          if (event.type === "text") {
-            first ??= performance.now() - started;
-            answer += event.content || "";
+          if (event.type === "text" || event.type === "replace_text") {
+            if (event.type === "text" && event.content) first ??= performance.now() - started;
+            answer = applyAnswerText(answer, event);
             setPhase(
               options.mode === "complete"
                 ? "Reviewing document segments"
@@ -1451,18 +1454,7 @@ export default function Home() {
               </select>
             </label>
             {provider === "ollama" ? (
-              <label>
-                Installed model
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  disabled={busy}
-                >
-                  {[...new Set([model, ...models])].map((m) => (
-                    <option key={m}>{m}</option>
-                  ))}
-                </select>
-              </label>
+              <ModelLibrary model={model} installed={models} recommended={recommendedModels} disabled={busy} onSelect={setModel} onInstalled={setModels} />
             ) : (
               <>
                 <label>

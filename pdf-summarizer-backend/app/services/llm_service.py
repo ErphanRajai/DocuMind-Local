@@ -180,10 +180,10 @@ class LLMService:
                         if (name := item.get("name"))
                         and name.split(":", 1)[0].lower() != embed_base
                     ]
-                    return models if models else [cls.CHAT_MODEL]
+                    return models
             except Exception as e:
                 logger.warning(f"Failed to fetch Ollama model tags: {e}")
-        return [cls.CHAT_MODEL]
+        return []
 
     @classmethod
     async def stream_openai_compatible(

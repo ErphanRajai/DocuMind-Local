@@ -85,7 +85,7 @@ class JobManager:
                     if not line:
                         continue
                     value = json.loads(line)
-                    if value["type"] == "text":
+                    if value["type"] in {"text", "replace_text"}:
                         job.state = "generating"
                     elif value["type"] == "done":
                         job.state = "completed"

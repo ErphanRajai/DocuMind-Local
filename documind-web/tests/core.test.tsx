@@ -8,7 +8,7 @@ import {
   safeSources,
   newWorkspace,
 } from "../lib/workspaces";
-import { api, decodeEvents, consumeJob, waitDocuments } from "../lib/api";
+import { api, decodeEvents, consumeJob, waitDocuments, applyAnswerText } from "../lib/api";
 
 const source = {
   id: "S1",
@@ -108,6 +108,14 @@ it("leaves room for the latest question inside the API history limit", () => {
 });
 
 describe("generation protocol", () => {
+  it("replaces a retry draft while preserving prior answers and Unicode", () => {
+    let text = applyAnswerText("", { type: "text", content: "سؤال ۱ 🌱\nChecked\n" });
+    text = applyAnswerText(text, { type: "text", content: "Failed second draft" });
+    text = applyAnswerText(text, { type: "replace_text", content: "سؤال ۱ 🌱\nChecked\n" });
+    text = applyAnswerText(text, { type: "text", content: "Correct second answer" });
+    expect(text).toBe("سؤال ۱ 🌱\nChecked\nCorrect second answer");
+    expect(applyAnswerText(text, { type: "replace_text", content: "" })).toBe("");
+  });
   it("decodes UTF-8 and NDJSON split across bytes", async () => {
     const bytes = new TextEncoder().encode(
       '{"type":"text","content":"café 🌱"}\n{"type":"done"}\n',

@@ -21,11 +21,13 @@ The **Exam desk** prioritizes direct answers from the selected source PDFs, incl
 ## What you can do
 
 - **Chat with PDFs:** index a document once, ask follow-up questions and inspect the original pages behind citations.
+- **Ask a numbered question set:** send up to 20 questions in one chat message. Each gets its own evidence search and answer budget, with live text, progress and bounded retries. A shortened replacement is labelled; an incomplete response is not reported as complete.
 - **Study notes → question paper → answers:** choose study references separately from the exam. Process up to 100 reviewed questions per run and review each result independently.
 - **Use multiple languages:** match the question's language or select an answer language, including Persian. Persian/Arabic OCR, native digits and right-to-left answer rendering are supported.
 - **Read and check mathematics:** automatic inline/display LaTeX, algebra, calculus, matrices and unit conversions through bounded SymPy/Pint tools. Review model-interpreted inputs before calculating.
 - **Study actively:** worked explanations, hints, practice questions, review of your working, saved study items and a review queue.
 - **Keep work locally:** saved workspaces, export/import, per-question results, progress, stop/retry controls and local document management.
+- **Manage local models:** see installed/missing models, review download size and free space, edit the model-library destination, then explicitly install through Windows Command Prompt. See the [model installation and CLI guide](docs/model-installation.md).
 
 ## Install on Windows
 
@@ -39,7 +41,7 @@ The **Exam desk** prioritizes direct answers from the selected source PDFs, incl
 2. Double-click **`Install_DocuMind.cmd`**. It checks Python, Node.js, Docker Desktop and Ollama; offers the official installers for missing prerequisites; downloads the models; builds the application; caches search assets; and verifies backend health. Complete any vendor, Windows permission, WSL or reboot prompts. Rerun the same installer after an interrupted setup.
 3. Open **DocuMind Local** from the desktop shortcut, or double-click **`Start_DocuMind.bat`**.
 
-The launcher opens the actual available local address. On this development machine that is `http://127.0.0.1:4400`; the configured default is port 4317, with fallbacks from 4400–4409. Use the address printed by your launcher.
+The launcher opens the actual available local address. The configured default is port 4317, with fallbacks from 4400–4409. Use the address printed by your launcher.
 
 This is a project-folder installer, not a standalone signed MSI. Closing the desktop window stops its app services. Existing PDFs, databases and older models are retained when setup is rerun.
 
@@ -119,13 +121,14 @@ $env:DOCUMIND_TEST_URL='http://127.0.0.1:4400' # Use your running app's actual U
 npm run test:e2e
 ```
 
-Latest local verification: **232 backend tests, 66 frontend tests, seven browser tests and the production build passed**. A generated bilingual 50-case exam benchmark used a real question PDF and a 120-page source; all 50 answer checks and all 30 expected-page citation checks passed. This is synthetic regression evidence, not a claim of real-exam accuracy. Complete workspace backup/restore and saved-run reuse were also tested against the running services. Many unit/browser tests use controlled substitutes; an OS-wide disconnected-machine test and clean-Windows prerequisite installation remain unverified.
+Latest local verification: **295 backend tests, 76 frontend tests, 10 browser tests and the production build passed**. A generated bilingual 50-case exam benchmark used a real question PDF and a 120-page source; all 50 answer checks and all 30 expected-page citation checks passed. This is synthetic regression evidence, not a claim of real-exam accuracy. Complete workspace backup/restore and saved-run reuse were also tested against the running services. Many unit/browser tests use controlled substitutes; an OS-wide disconnected-machine test and clean-Windows prerequisite installation remain unverified.
 
 Private PDFs, `.env`, databases, model storage, caches, logs and build output are excluded from Git. Back up local data and export important work before reinstalling or removing storage.
 
 ## Read the implementation
 
 - [Local installation, multilingual exams and code walkthrough](docs/local-installation-and-persian.md)
+- [Model library, Windows installer and command-line help](docs/model-installation.md)
 - [Study and Solve: tools, data flow and tradeoffs](docs/study-and-solve.md)
 - [PDF citations and evidence](docs/pdf-citations.md)
 - [Backend processing and validation](docs/backend-processing.md)

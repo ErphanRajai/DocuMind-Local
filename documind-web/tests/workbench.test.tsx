@@ -6,11 +6,13 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import Home from "../app/page";
 import { STORAGE_KEY } from "../lib/workspaces";
 import { api, consumeJob } from "../lib/api";
-vi.mock("../lib/api", () => ({
+vi.mock("../lib/api", async () => ({
+  ...(await vi.importActual<typeof import("../lib/api")>("../lib/api")),
   post: (body: unknown) => ({ method: "POST", body: JSON.stringify(body) }),
   api: vi.fn(),
   consumeJob: vi.fn(),
@@ -176,6 +178,31 @@ async function askWithoutWait() {
     key: "Enter",
   });
 }
+it("shows long answer chunks before completion and replaces only the retry draft", async () => {
+  let emitLive: ((event: import("../lib/types").StreamEvent) => void) | undefined;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  vi.mocked(consumeJob).mockImplementationOnce(async (_, emit) => {
+    emitLive = emit;
+    emit({ type: "text", content: "First answer complete.\n\nSecond draft in progress" });
+    await pending;
+    emit({ type: "done", metrics: {} });
+  });
+  await ready();
+  fireEvent.change(screen.getByLabelText("Answer length"), { target: { value: "long" } });
+  await askWithoutWait();
+  await screen.findByText(/Second draft in progress/);
+  expect(screen.getByRole("button", { name: "Stop generation" })).toBeInTheDocument();
+  act(() => {
+    emitLive!({ type: "replace_text", content: "First answer complete.\n\n" });
+    emitLive!({ type: "text", content: "Correct second answer" });
+  });
+  expect(screen.queryByText(/Second draft in progress/)).toBeNull();
+  expect(screen.getByText("First answer complete.")).toBeInTheDocument();
+  expect(screen.getByText("Correct second answer")).toBeInTheDocument();
+  await act(async () => { release(); });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull());
+});
 it("stops server work and labels its partial draft", async () => {
   vi.mocked(consumeJob).mockImplementationOnce(async (_, emit, signal) => {
     emit({ type: "text", content: "Partial draft" });
@@ -214,7 +241,7 @@ it("opens preferences and selects models and compatible providers", async () => 
   await ready();
   fireEvent.click(screen.getByRole("button", { name: "Model & preferences" }));
   const modal = screen.getByRole("dialog");
-  fireEvent.change(within(modal).getByLabelText("Installed model"), {
+  fireEvent.change(within(modal).getByLabelText("Model library"), {
     target: { value: "other-model" },
   });
   fireEvent.change(within(modal).getByLabelText("Model source"), {

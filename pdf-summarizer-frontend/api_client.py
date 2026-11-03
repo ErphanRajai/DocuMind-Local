@@ -31,6 +31,11 @@ def response_text_chunks(response, telemetry):
             telemetry.update(event)
         elif kind == "text":
             yield event["content"]
+        elif kind == "replace_text":
+            telemetry['_replace_text'] = True
+            yield event['content']
+        elif kind in {'status','heartbeat'}:
+            continue
         elif kind == "error":
             raise RuntimeError(event.get("message", "The answer could not be completed."))
         elif kind == "done":

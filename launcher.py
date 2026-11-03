@@ -26,7 +26,12 @@ def load_project_environment() -> dict[str, str]:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
-                environment.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                    value = value[1:-1]
+                environment.setdefault(key.strip(), value)
+    if environment.get("DOCUMIND_MODEL_DIRECTORY"):
+        environment["OLLAMA_MODELS"] = environment["DOCUMIND_MODEL_DIRECTORY"]
     return environment
 
 
@@ -110,7 +115,22 @@ def start_ollama_if_needed() -> subprocess.Popen | None:
     try:
         with urllib.request.urlopen(url, timeout=2) as response:
             if response.status == 200:
-                return None  # Never restart a server started by another app.
+                if not ENVIRONMENT.get("DOCUMIND_MODEL_DIRECTORY"):
+                    return None  # Never restart a server started by another app.
+                # A changed library requires a server with its own environment.
+                # Leave the other app's server alone and select a free port.
+                for candidate in range(21434, 21464):
+                    with socket.socket() as probe:
+                        try:
+                            probe.bind(("127.0.0.1", candidate))
+                        except OSError:
+                            continue
+                    ENVIRONMENT["DOCUMIND_OLLAMA_PORT"] = str(candidate)
+                    environment = ollama_environment(ENVIRONMENT)
+                    url = f"http://{environment['OLLAMA_HOST']}/api/version"
+                    break
+                else:
+                    raise RuntimeError("No local Ollama port is free for the selected model library.")
     except (OSError, urllib.error.URLError):
         pass
     executable = shutil.which("ollama")
@@ -172,6 +192,8 @@ def main() -> int:
 
     print("Starting DocuMind services. The first launch may take a few minutes...")
     ollama_process = start_ollama_if_needed()
+    if ollama_process is not None and ollama_process.poll() is None:
+        ENVIRONMENT["DOCUMIND_OLLAMA_OWNED"] = "1"
     result = subprocess.run(compose + (["up", "-d", "--pull", "never"] if offline else ["up", "-d", "--build"]), cwd=ROOT, env=ENVIRONMENT)
     if result.returncode != 0:
         stop_owned_ollama(ollama_process)
@@ -184,7 +206,13 @@ def main() -> int:
         return 1
 
     frontend = None
+    model_manager = None
     try:
+        from model_installation import ModelManager
+        model_manager = ModelManager(ROOT, ENVIRONMENT)
+        # Only the host Next.js process receives this per-launch secret. It is
+        # neither a browser preference nor a Docker/container setting.
+        installer_environment = model_manager.start()
         frontend_url = choose_frontend_url(FRONTEND_URL)
         if frontend_url != FRONTEND_URL:
             print(f"The configured frontend port is unavailable; using {frontend_url}")
@@ -192,7 +220,7 @@ def main() -> int:
         frontend = subprocess.Popen(
             command,
             cwd=frontend_cwd,
-            env=ENVIRONMENT,
+            env={**ENVIRONMENT, **installer_environment},
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
 
@@ -227,6 +255,8 @@ def main() -> int:
         return 1
     finally:
         stop_process(frontend)
+        if model_manager:
+            model_manager.close()
         subprocess.run(compose + ["down"], cwd=ROOT, env=ENVIRONMENT, check=False, capture_output=True)
         stop_owned_ollama(ollama_process)
 

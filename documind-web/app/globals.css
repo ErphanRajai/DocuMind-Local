@@ -929,6 +929,77 @@ summary {
 .settings .primary {
   width: 100%;
 }
+.model-library label {
+  display: block;
+  margin: var(--space-md) 0;
+  font-weight: 500;
+}
+.model-library select,
+.model-library input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  margin-top: var(--space-sm);
+  border: var(--rule-width) solid var(--color-control);
+  border-radius: var(--radius-control);
+  background: var(--color-paper);
+}
+.model-library label small,
+.model-description {
+  display: block;
+  font-size: var(--text-small);
+  font-weight: 400;
+  color: var(--color-muted);
+  margin-top: var(--space-sm);
+  overflow-wrap: anywhere;
+}
+.model-install-review,
+.model-install-progress {
+  margin: var(--space-lg) 0;
+  padding-block: var(--space-md);
+  border-block: var(--rule-width) solid var(--color-line);
+}
+.model-install-review h3 {
+  font-size: var(--text-body);
+}
+.model-install-review dl {
+  margin-block: var(--space-md);
+}
+.model-install-review dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-block: var(--space-sm);
+}
+.model-install-review dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.model-destination {
+  overflow-wrap: anywhere;
+}
+.model-install-review .primary,
+.model-install-progress progress {
+  width: 100%;
+}
+.model-install-progress progress {
+  accent-color: var(--color-accent);
+}
+.study-model-library {
+  margin: 0 var(--space-xl) var(--space-md);
+  max-width: 720px;
+}
+@media (max-width: 600px) {
+  .study-model-library {
+    margin-inline: var(--space-md);
+  }
+  .model-library input,
+  .model-library select {
+    font-size: 16px;
+  }
+}
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-control) transparent;

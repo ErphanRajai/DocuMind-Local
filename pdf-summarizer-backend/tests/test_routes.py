@@ -117,7 +117,9 @@ def test_generation_failure_is_control_event_not_answer(client, monkeypatch):
         raise GenerationError("Model unavailable")
     monkeypatch.setattr(LLMService, "stream_messages", broken)
     result = events(client.post("/summarizer/chat", json={"question": "Hello"}))
-    assert result[-1] == {"type": "error", "message": "Model unavailable"}
+    assert result[-1]['type'] == 'error' and result[-1]['message'] == 'Model unavailable'
+    assert result[-1]['metrics']['answer_length'] == 'short'
+    assert 'api_key' not in result[-1]['metrics']
     assert not any(event["type"] == "done" for event in result)
     assert [event["content"] for event in result if event["type"] == "text"] == ["Partial answer"]
 

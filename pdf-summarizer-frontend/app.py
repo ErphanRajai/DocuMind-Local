@@ -217,7 +217,7 @@ def stream_with_metrics(client, url, payload, placeholder):
             for raw_text in response_text_chunks(response, telemetry):
                 if ttft is None:
                     ttft = (time.perf_counter() - t_start) * 1000.0
-                ai_text += raw_text
+                ai_text = raw_text if telemetry.pop('_replace_text', False) else ai_text + raw_text
                 now = time.perf_counter()
                 if now - last_render >= 0.04:
                     placeholder.markdown(cited_markdown(ai_text, telemetry.get("sources"), BACKEND_BASE_URL) + " ▍")

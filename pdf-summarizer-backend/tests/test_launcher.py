@@ -130,3 +130,24 @@ def test_launcher_checks_docker_engine_not_just_cli(monkeypatch):
     monkeypatch.setattr(launcher.subprocess, "run", run)
     assert launcher.main() == 1
     assert run.call_args.args[0] == ["docker", "info", "--format", "{{.ServerVersion}}"]
+
+def test_selected_library_overrides_generic_ollama_location(monkeypatch,tmp_path):
+    monkeypatch.setattr(launcher,'ROOT',tmp_path)
+    monkeypatch.delenv('DOCUMIND_MODEL_DIRECTORY',raising=False)
+    monkeypatch.setenv('OLLAMA_MODELS','old-location')
+    (tmp_path/'.env').write_text('DOCUMIND_MODEL_DIRECTORY='+str(tmp_path/'chosen-models'))
+    assert launcher.load_project_environment()['OLLAMA_MODELS']==str(tmp_path/'chosen-models')
+
+def test_changed_library_does_not_kill_a_foreign_server(monkeypatch,tmp_path):
+    monkeypatch.setattr(launcher,'ENVIRONMENT',{'DOCUMIND_OLLAMA_PORT':'21434','DOCUMIND_MODEL_DIRECTORY':str(tmp_path/'models'),'OLLAMA_MODELS':str(tmp_path/'models')})
+    response=MagicMock();response.__enter__.return_value.status=200
+    monkeypatch.setattr(launcher.urllib.request,'urlopen',lambda *a,**kw:response)
+    probe=MagicMock();probe.__enter__.return_value=probe;probe.bind.side_effect=[OSError('in use'),None]
+    monkeypatch.setattr(launcher.socket,'socket',lambda *a:probe)
+    monkeypatch.setattr(launcher.shutil,'which',lambda *a:'ollama')
+    process=MagicMock();spawn=MagicMock(return_value=process)
+    monkeypatch.setattr(launcher.subprocess,'Popen',spawn)
+    monkeypatch.setattr(launcher,'wait_for_url',lambda *a,**kw:True)
+    assert launcher.start_ollama_if_needed() is process
+    assert spawn.call_args.kwargs['env']['OLLAMA_HOST']=='127.0.0.1:21435'
+    assert launcher.ENVIRONMENT['DOCUMIND_OLLAMA_PORT']=='21435'

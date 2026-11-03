@@ -46,6 +46,7 @@ test-results/
 .taste-skill/after/
 *.tsbuildinfo
 output/
+/graphify-out/
 .coverage
 .coverage.*
 

@@ -17,6 +17,7 @@ import {
 import { Answer } from "./answer";
 import { ExamRunner, ExamAnswers, type ExamAnswer } from "./exam-runner";
 import { WorkspaceTransfer } from "./workspace-transfer";
+import { ModelLibrary } from "./model-library";
 import { LanguageSelect } from "./language-select";
 import { api, post, consumeJob, waitDocuments } from "../lib/api";
 import {
@@ -651,6 +652,10 @@ export function StudyDesk() {
         <span className="study-local">Saved on this computer</span>
       </div>
       <WorkspaceTransfer workspace={active} disabled={busy||examBusy}/>
+      <details className="study-model-library">
+        <summary>Model: {model} · Manage models</summary>
+        <ModelLibrary model={model} installed={models} disabled={busy || examBusy} onSelect={setModel} onInstalled={setModels} />
+      </details>
       <nav className="study-tabs" aria-label="Study tools">
         {[
           ["solve", "Solve & explain"],

@@ -4,4 +4,4 @@
 
 `documind-study-preview.gif` is an excerpt of that recording for automatic playback in GitHub's README image renderer. `documind-study-preview.jpg` is a still captured from the same live interface. The MP4 uses H.264 with its metadata at the start for browser playback. Playback timing is demonstration timing, not a performance benchmark.
 
-The older `documind-demo.mp4`, `documind-demo.gif`, `document-chat.jpg` and `welcome.jpg` show the preserved Streamlit interface and remain as historical assets. They are not the current main-interface preview.
+Older Streamlit recordings and screenshots are local-only and ignored by Git. The current study-desk preview above remains included in the repository for online and offline viewing.

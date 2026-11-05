@@ -50,10 +50,39 @@ output/
 .coverage
 .coverage.*
 
-# Local design inspection output; durable product/design documentation stays tracked.
+# Local design-tool state and working notes; public guidance lives in docs/ and DESIGN.md.
 .hallmark/
 .taste-skill/
-.impeccable/*
-!.impeccable/design.json
-!.impeccable/*-brief.md
-!.impeccable/*-documentation.md
+.impeccable/
+
+# Generated frontend type references are recreated by Next.js.
+/documind-web/next-env.d.ts
+
+# Superseded Streamlit previews; keep the current study preview public.
+/docs/media/documind-demo.gif
+/docs/media/documind-demo.mp4
+/docs/media/document-chat.jpg
+/docs/media/welcome.jpg
+
+# Local runtimes, model weights, installers and release output.
+venv_win/
+/runtime/
+/prerequisites/
+/wheels/
+/build/
+/dist/
+/offline-bundle/
+/containers.tar
+*.gguf
+*.safetensors
+*.onnx
+
+# Local caches, coverage output and SQLite backups/journals.
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+htmlcov/
+coverage.xml
+*.sqlite
+*.sqlite-*
